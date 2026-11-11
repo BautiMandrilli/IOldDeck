@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Diseñar · Mi panel</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body class="editor-body">
+  <header class="designer-header">
+    <div><strong>Panel Propio</strong><span class="designer-subtitle">Editor visual</span></div>
+    <div class="designer-header-actions"><a href="/" class="header-link">Abrir panel</a><button id="save" type="button" class="edit-button primary">Guardar cambios</button></div>
+  </header>
+  <main class="designer-layout">
+    <aside class="designer-sidebar">
+      <label class="field">Nombre del panel<input id="panel-title" maxlength="60"></label>
+      <label class="field">Página<select id="page-select"></select></label>
+      <div class="edit-controls">
+        <button id="add-page" type="button" class="edit-button small">+ Página</button>
+        <button id="page-up" type="button" class="edit-button small">↑</button>
+        <button id="page-down" type="button" class="edit-button small">↓</button>
+        <button id="delete-page" type="button" class="edit-button small danger">Eliminar</button>
+      </div>
+      <h2 class="side-heading">Fondo y página</h2>
+      <div id="page-controls"></div>
+      <h2 class="side-heading">Botones</h2>
+      <button id="add-button" type="button" class="edit-button primary full">+ Agregar botón</button>
+      <div id="button-controls" class="button-inspector"><p class="hint">Seleccioná un botón en el lienzo para editarlo.</p></div>
+      <p id="editor-message" role="status"></p>
+    </aside>
+    <section class="designer-preview">
+      <div class="preview-heading"><div><h1>Vista previa del iPad</h1><p>Arrastrá un botón para moverlo. Tirás de una esquina inferior para cambiarle el tamaño.</p></div><span>1024 px de ancho de diseño</span></div>
+      <div id="preview-shell" class="preview-shell"><div id="preview-canvas" class="dashboard-canvas"></div></div>
+    </section>
+  </main>
+  <script src="/designer.js"></script>
+</body>
+</html>
