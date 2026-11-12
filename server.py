@@ -798,8 +798,25 @@ class Handler(BaseHTTPRequestHandler):
             return self.json_response(500, {"error": str(exc)})
 
 
+class PanelServer(ThreadingHTTPServer):
+    """Refuses to share the port. On Windows, SO_REUSEADDR (the http.server default)
+    lets a second server bind the same port silently; the iPad then keeps talking to
+    the old one, whose pairing code differs from the one just printed."""
+    allow_reuse_address = os.name != "nt"
+
+    def server_bind(self):
+        if os.name == "nt":
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
+
 if __name__ == "__main__":
-    server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
+    try:
+        server = PanelServer(("0.0.0.0", PORT), Handler)
+    except OSError:
+        print("El puerto %d ya está en uso: ya hay otro Panel Propio abierto (¿otra terminal con npm run dev?)." % PORT)
+        print("Cerralo con Ctrl+C en esa terminal y volvé a iniciar este. El código de vinculación es el de ese otro servidor.")
+        raise SystemExit(1)
     print("Editor en la PC: http://localhost:%d/editor" % PORT)
     print("iPad: http://%s:%d" % (local_ip(), PORT))
     print("Código para vincular el iPad: %s" % PAIR_CODE)

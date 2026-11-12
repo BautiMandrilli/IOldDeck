@@ -311,6 +311,15 @@ class TestPanelServer(unittest.TestCase):
         self.panel.CONFIG_FILE.write_text(json.dumps(cfg), encoding="utf-8")
         self.assertEqual(self.request("/api/action", b'{"id":"player"}').code, 404)
 
+    def test_second_server_cannot_share_the_port(self):
+        # Two servers on one port means two pairing codes; the second must fail loudly.
+        first = self.panel.PanelServer(("127.0.0.1", 0), self.panel.Handler)
+        try:
+            with self.assertRaises(OSError):
+                self.panel.PanelServer(("127.0.0.1", first.server_address[1]), self.panel.Handler)
+        finally:
+            first.server_close()
+
     def test_mute_feedback_toggles_after_action(self):
         panel = self.panel
         original = panel.send_hotkey
