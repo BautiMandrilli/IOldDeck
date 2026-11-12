@@ -130,16 +130,16 @@ h1, h2 { margin: 0; }
 
 .pages { padding: 24px 20px 104px; max-width: 1300px; margin: 0 auto; }
 .is-standalone .pages { padding-top: 44px; }
-.page-track { will-change: transform; }
+.page-track { display: -webkit-flex; display: flex; -webkit-align-items: flex-start; align-items: flex-start; will-change: transform; -webkit-transform: translate3d(0,0,0); transform: translate3d(0,0,0); -webkit-backface-visibility: hidden; backface-visibility: hidden; }
+.page-slide { -webkit-flex: 0 0 auto; flex: 0 0 auto; margin-right: 40px; }
+.pages { overflow: hidden; }
 .page-title { margin: 0 4px 16px; padding-right: 240px; font-size: 32px; font-weight: 700; letter-spacing: -.025em; line-height: 38px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* Floating page switcher. */
 .tabbar { position: fixed; z-index: 20; left: 0; right: 0; bottom: 0; padding: 26px 16px 18px; text-align: center; pointer-events: none; background: -webkit-linear-gradient(top, rgba(11,11,13,0), rgba(11,11,13,.75)); background: linear-gradient(to bottom, rgba(11,11,13,0), rgba(11,11,13,.75)); }
 .tabbar.is-single { display: none; }
 .tabbar-pill { position: relative; display: inline-block; max-width: 100%; padding: 4px; border-radius: 26px; white-space: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; pointer-events: auto; background: rgba(44,44,46,.96); box-shadow: 0 10px 30px rgba(0,0,0,.4), inset 0 0 0 .5px rgba(255,255,255,.12); }
-@supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
-  .tabbar-pill { background: rgba(58,58,62,.6); -webkit-backdrop-filter: saturate(180%) blur(20px); backdrop-filter: saturate(180%) blur(20px); }
-}
+/* No backdrop blur: re-blurring the moving page every frame is what the iPad 2 GPU cannot afford. */
 .tab-indicator { position: absolute; left: 0; top: 4px; bottom: 4px; width: 0; border-radius: 22px; background: rgba(255,255,255,.16); -webkit-transition: -webkit-transform .42s cubic-bezier(.2,.9,.25,1), width .42s cubic-bezier(.2,.9,.25,1); transition: transform .42s cubic-bezier(.2,.9,.25,1), width .42s cubic-bezier(.2,.9,.25,1); }
 .tab { position: relative; display: inline-block; min-width: 88px; height: 44px; padding: 0 20px; border: 0; border-radius: 22px; background: transparent; color: rgba(235,235,245,.6); font-size: 15px; font-weight: 600; letter-spacing: -.01em; -webkit-transition: color .25s; transition: color .25s; }
 .tab.selected { color: #fff; }
@@ -195,6 +195,24 @@ h1, h2 { margin: 0; }
 }
 
 /* ---------- Accessibility ---------- */
+/* ---------- Themes (static gradients only: no animation, cheap on the iPad 2) ----------
+   theme-<id>: page background (html on the iPad, device frame / swatch in the editor).
+   canvas-theme-<id>: the button container. "clasico" uses no class. */
+html.theme-medianoche body, html.theme-aurora body, html.theme-carbono body, html.theme-atardecer body, html.theme-oceano body { background: transparent; }
+/* The root box fills the screen so gradients stretch once instead of tiling. */
+html.theme-medianoche, html.theme-aurora, html.theme-atardecer, html.theme-oceano { min-height: 100%; background-repeat: no-repeat; }
+html.theme-carbono { min-height: 100%; }
+html.theme-medianoche, .device-frame.theme-medianoche, .theme-swatch.theme-medianoche { background-color: #05070f; background-image: radial-gradient(ellipse at 15% 0%, rgba(64,100,255,.28), rgba(64,100,255,0) 55%), radial-gradient(ellipse at 90% 100%, rgba(140,70,255,.2), rgba(140,70,255,0) 55%); }
+.canvas-theme-medianoche { background-color: #0c1226; background-image: repeating-linear-gradient(45deg, rgba(255,255,255,.035) 0, rgba(255,255,255,.035) 1px, rgba(255,255,255,0) 1px, rgba(255,255,255,0) 14px), linear-gradient(160deg, #16204a, #0a0f22); }
+html.theme-aurora, .device-frame.theme-aurora, .theme-swatch.theme-aurora { background-color: #030806; background-image: radial-gradient(ellipse at 8% 8%, rgba(48,209,88,.24), rgba(48,209,88,0) 50%), radial-gradient(ellipse at 85% 15%, rgba(90,200,250,.2), rgba(90,200,250,0) 50%), radial-gradient(ellipse at 50% 115%, rgba(175,82,222,.24), rgba(175,82,222,0) 55%); }
+.canvas-theme-aurora { background-color: #07110e; background-image: radial-gradient(ellipse at 0% 0%, rgba(48,209,88,.3), rgba(48,209,88,0) 50%), radial-gradient(ellipse at 100% 0%, rgba(90,200,250,.24), rgba(90,200,250,0) 48%), radial-gradient(ellipse at 60% 120%, rgba(175,82,222,.3), rgba(175,82,222,0) 55%); }
+html.theme-carbono, .device-frame.theme-carbono, .theme-swatch.theme-carbono { background-color: #0a0a0b; background-image: linear-gradient(rgba(255,255,255,.035) 1px, rgba(255,255,255,0) 1px), linear-gradient(90deg, rgba(255,255,255,.035) 1px, rgba(255,255,255,0) 1px); background-size: 32px 32px; }
+.canvas-theme-carbono { background-color: #161618; background-image: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,0) 40%), repeating-linear-gradient(45deg, rgba(255,255,255,.035) 0, rgba(255,255,255,.035) 2px, rgba(255,255,255,0) 2px, rgba(255,255,255,0) 6px), repeating-linear-gradient(-45deg, rgba(0,0,0,.3) 0, rgba(0,0,0,.3) 2px, rgba(0,0,0,0) 2px, rgba(0,0,0,0) 6px); }
+html.theme-atardecer, .device-frame.theme-atardecer, .theme-swatch.theme-atardecer { background-color: #1a0b2e; background-image: linear-gradient(180deg, #1a0b2e 0%, #3b0f3a 60%, #5c1a2e 100%); }
+.canvas-theme-atardecer { background-color: #2a0f3d; background-image: radial-gradient(ellipse at 50% 112%, rgba(255,159,10,.4), rgba(255,159,10,0) 45%), repeating-linear-gradient(0deg, rgba(255,140,90,.09) 0, rgba(255,140,90,.09) 1px, rgba(255,140,90,0) 1px, rgba(255,140,90,0) 22px), linear-gradient(180deg, #2a0f3d, #47184a 60%, #6b2338); }
+html.theme-oceano, .device-frame.theme-oceano, .theme-swatch.theme-oceano { background-color: #021a24; background-image: linear-gradient(160deg, #02202c, #03303d 60%, #01131b); }
+.canvas-theme-oceano { background-color: #06303c; background-image: repeating-radial-gradient(circle at 50% 125%, rgba(255,255,255,.04) 0, rgba(255,255,255,.04) 1px, rgba(255,255,255,0) 1px, rgba(255,255,255,0) 26px), linear-gradient(180deg, #0b4655, #05252f); }
+
 @media (prefers-reduced-motion: reduce) {
   .action-canvas, .canvas-background { -webkit-animation: none !important; animation: none !important; }
   .action-canvas.is-pressed, .spotify-control.is-pressed, .sheet-close.is-pressed, .pair button.is-pressed { -webkit-transform: none; transform: none; }

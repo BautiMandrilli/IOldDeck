@@ -143,6 +143,40 @@ class TestPanelServer(unittest.TestCase):
             browser.assert_called_once_with("https://discord.com/app", new=2)
             self.assertEqual((launch.call_count, forward.call_count), (1, 1))
 
+    def test_games_launch_only_when_the_game_is_installed(self):
+        panel = self.panel
+        cfg = self.folder_config()
+        cfg["pages"][0]["buttons"][2].update(action="app", value="leagueoflegends")
+        panel.CONFIG_FILE.write_text(json.dumps(cfg), encoding="utf-8")
+        riot = r"D:\Riot Games\Riot Client\RiotClientServices.exe"
+        with mock.patch.object(panel, "launch_exe") as exe, mock.patch.object(panel, "launch_uri") as uri,                 mock.patch.object(panel, "bring_app_forward"), mock.patch.object(panel.webbrowser, "open") as browser:
+            with mock.patch.object(panel, "riot_client_exe", return_value=riot):
+                result = self.request("/api/action", b'{"id":"google"}')
+            self.assertEqual(result.value["opened"], "app")
+            exe.assert_called_once_with([riot, "--launch-product=league_of_legends", "--launch-patchline=live"])
+            with mock.patch.object(panel, "riot_client_exe", return_value=None):
+                self.assertEqual(self.request("/api/action", b'{"id":"google"}').value["opened"], "web")
+            browser.assert_called_once_with("https://www.leagueoflegends.com/", new=2)
+            uri.assert_not_called()
+        # Steam/Epic being installed is not enough: the game itself must be.
+        with mock.patch.object(panel, "app_installed", return_value=True):
+            with mock.patch.object(panel, "steam_app_installed", return_value=True):
+                self.assertEqual(panel.app_target("counterstrike"), "steam://rungameid/730")
+            with mock.patch.object(panel, "steam_app_installed", return_value=False):
+                self.assertIsNone(panel.app_target("counterstrike"))
+            with mock.patch.object(panel, "epic_app_installed", return_value=True):
+                self.assertTrue(panel.app_target("fortnite").startswith("com.epicgames.launcher://apps/"))
+            with mock.patch.object(panel, "epic_app_installed", return_value=False):
+                self.assertIsNone(panel.app_target("fortnite"))
+
+    def test_theme_is_validated_and_defaults_to_classic(self):
+        cfg = self.folder_config()
+        self.assertEqual(self.panel.validate(cfg)["theme"], "clasico")
+        cfg["theme"] = "aurora"
+        self.assertEqual(self.panel.validate(cfg)["theme"], "aurora")
+        cfg["theme"] = "<script>"
+        self.assertEqual(self.panel.validate(cfg)["theme"], "clasico")
+
     def test_desktop_app_rejects_unknown_or_raw_schemes(self):
         cfg = self.folder_config()
         for value in ("calc", "ms-msdt:/id", "file:///C:/Windows/System32/cmd.exe", ""):

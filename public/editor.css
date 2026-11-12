@@ -168,6 +168,17 @@
 .insert-button.is-primary .plus-badge circle { fill: #fff; stroke: var(--accent); }
 .insert-button.is-primary .plus-badge path { stroke: var(--accent); }
 .insert-button.is-spotify .plus-badge circle { fill: var(--accent); }
+/* Theme library */
+.theme-list { display: flex; flex-wrap: wrap; margin: 0 -4px; }
+.theme-option { flex: 0 0 calc(50% - 8px); margin: 4px; padding: 6px 6px 8px; border: 0; border-radius: 14px; background: var(--card); color: var(--label); text-align: left; box-shadow: inset 0 0 0 1px var(--hairline); transition: box-shadow .15s, transform .25s var(--ease); }
+.theme-option:hover { box-shadow: inset 0 0 0 1px rgba(255,255,255,.25); }
+.theme-option:active { transform: scale(.97); transition-duration: .06s; }
+.theme-option.is-selected { box-shadow: inset 0 0 0 2px var(--accent); }
+.theme-option:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.theme-swatch { display: block; height: 62px; padding: 9px; border-radius: 10px; background-color: #0b0b0d; }
+.theme-swatch-canvas { display: flex; align-items: flex-start; height: 100%; padding: 6px; border-radius: 7px; background-color: #111827; }
+.theme-swatch-tile { flex: 1; height: 16px; margin: 0 2px; border-radius: 4px; background: rgba(255,255,255,.22); }
+.theme-name { display: block; margin: 7px 2px 0; font-size: 12.5px; font-weight: 600; }
 .insert-button:hover:not(:disabled) { background: var(--control); }
 .insert-button.is-primary:hover:not(:disabled) { background: #3d9bff; }
 .insert-button:hover:not(:disabled) + .insert-button, .insert-button.is-primary + .insert-button { box-shadow: none; }

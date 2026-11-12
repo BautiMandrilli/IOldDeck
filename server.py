@@ -9,6 +9,7 @@ import os
 import re
 import secrets
 import socket
+import subprocess
 import threading
 import time
 import urllib.parse
@@ -36,6 +37,7 @@ TOKEN = TOKEN_FILE.read_text(encoding="ascii").strip()
 
 DEFAULT = {
     "title": "Mi panel",
+    "theme": "clasico",
     "pages": [
         {"id": "inicio", "title": "Inicio", "layout": "grid", "height": 528, "backgroundColor": "#111827", "backgroundImage": "", "backgroundAnimation": "none", "buttons": [
             {"id": "mute", "label": "Mutear Discord", "x": 24, "y": 24, "w": 300, "h": 125, "backgroundColor": "#6d28d9", "textColor": "#ffffff", "radius": 18, "animation": "none", "icon": "", "image": "", "action": "hotkey", "value": "ctrl+shift+m", "feedback": {"mode": "toggle", "activeLabel": "🔇 Discord muteado", "activeColor": "#b91c1c", "activeIcon": ""}},
@@ -119,6 +121,11 @@ def list_assets():
     if not ASSET_INDEX.exists():
         return []
     return json.loads(ASSET_INDEX.read_text(encoding="utf-8"))
+
+
+# Panel-wide visual themes (page background + button container). CSS lives in
+# style.css as .theme-<id> / .canvas-theme-<id>; the list is mirrored in PanelLayout.themes.
+THEMES = ("clasico", "medianoche", "aurora", "carbono", "atardecer", "oceano")
 
 
 def validate(raw):
@@ -221,7 +228,8 @@ def validate(raw):
                       "buttons": buttons})
     if not pages:
         raise ValueError("Debe existir al menos una página")
-    return {"version": 3, "title": title, "pages": pages}
+    theme = raw.get("theme", "clasico")
+    return {"version": 3, "title": title, "theme": theme if theme in THEMES else "clasico", "pages": pages}
 
 
 MAX_CONFIG = 2000000
@@ -411,6 +419,10 @@ DESKTOP_APPS = {
     "notion": ("Notion", "notion", "notion://", "https://www.notion.so/", ("notion.exe",), None),
     "figma": ("Figma", "figma", "figma://", "https://www.figma.com/", ("figma.exe",), None),
     "claude": ("Claude", "claude", "claude://", "https://claude.ai/", ("claude.exe",), None),
+    # Games: installed only when the game itself is (see app_target); League starts via the Riot Client.
+    "leagueoflegends": ("League of Legends", "riotclient", None, "https://www.leagueoflegends.com/", ("leagueclientux.exe", "riotclientux.exe"), None),
+    "counterstrike": ("Counter-Strike 2", "steam", "steam://rungameid/730", "https://www.counter-strike.net/", ("cs2.exe",), None),
+    "fortnite": ("Fortnite", "com.epicgames.launcher", "com.epicgames.launcher://apps/fn%3A4fe75bbc5a674f4f9b356b5c90567da5%3AFortnite?action=launch&silent=true", "https://www.fortnite.com/", ("fortniteclient-win64-shipping.exe",), None),
 }
 
 
@@ -428,6 +440,72 @@ def app_installed(scheme):
 
 def launch_uri(uri):
     os.startfile(uri)
+
+
+def launch_exe(argv):
+    """Starts a registry-discovered launcher (never user input) without a shell."""
+    subprocess.Popen(argv, cwd=os.path.dirname(argv[0]), close_fds=True)
+
+
+def riot_client_exe():
+    """RiotClientServices.exe path from League's own uninstall entry, if League is installed."""
+    if os.name != "nt":
+        return None
+    import winreg
+    for hive in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+        try:
+            with winreg.OpenKey(hive, r"Software\Microsoft\Windows\CurrentVersion\Uninstall\Riot Game league_of_legends.live") as key:
+                command = winreg.QueryValueEx(key, "UninstallString")[0]
+        except OSError:
+            continue
+        match = re.match(r'\s*"([^"]+\\RiotClientServices\.exe)"', command, re.I)
+        if match and os.path.isfile(match.group(1)):
+            return match.group(1)
+    return None
+
+
+def steam_app_installed(appid):
+    if os.name != "nt":
+        return False
+    import winreg
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam") as key:
+            steam = winreg.QueryValueEx(key, "SteamPath")[0]
+    except OSError:
+        return False
+    libraries = [steam]
+    try:
+        text = (Path(steam) / "steamapps" / "libraryfolders.vdf").read_text(encoding="utf-8", errors="replace")
+        libraries += [p.replace("\\\\", "\\") for p in re.findall(r'"path"\s+"([^"]+)"', text)]
+    except OSError:
+        pass
+    return any((Path(lib) / "steamapps" / ("appmanifest_%s.acf" % appid)).is_file() for lib in libraries)
+
+
+def epic_app_installed(app_name):
+    folder = Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData")) / "Epic" / "EpicGamesLauncher" / "Data" / "Manifests"
+    for item in folder.glob("*.item") if folder.is_dir() else ():
+        try:
+            if json.loads(item.read_text(encoding="utf-8", errors="replace")).get("AppName") == app_name:
+                return True
+        except (OSError, ValueError):
+            continue
+    return False
+
+
+def app_target(slug):
+    """What open_app would launch: a URI, an argv list, or None when not installed."""
+    scheme, uri = DESKTOP_APPS[slug][1:3]
+    if slug == "leagueoflegends":
+        exe = riot_client_exe()
+        return [exe, "--launch-product=league_of_legends", "--launch-patchline=live"] if exe else None
+    if not app_installed(scheme):
+        return None
+    if slug == "counterstrike" and not steam_app_installed(730):
+        return None
+    if slug == "fortnite" and not epic_app_installed("Fortnite"):
+        return None
+    return uri
 
 
 def _process_name(hwnd):
@@ -542,9 +620,13 @@ def bring_app_forward(slug):
 
 def open_app(slug):
     """Opens the desktop app when installed, otherwise its website. Returns "app" or "web"."""
-    scheme, uri, web = DESKTOP_APPS[slug][1:4]
-    if app_installed(scheme):
-        launch_uri(uri)
+    web = DESKTOP_APPS[slug][3]
+    target = app_target(slug)
+    if target:
+        if isinstance(target, list):
+            launch_exe(target)
+        else:
+            launch_uri(target)
         bring_app_forward(slug)
         return "app"
     webbrowser.open(web, new=2)
@@ -552,7 +634,7 @@ def open_app(slug):
 
 
 def desktop_apps():
-    return [{"slug": slug, "name": item[0], "installed": app_installed(item[1]), "web": item[3]}
+    return [{"slug": slug, "name": item[0], "installed": app_target(slug) is not None, "web": item[3]}
             for slug, item in DESKTOP_APPS.items()]
 
 
@@ -697,7 +779,7 @@ class Handler(BaseHTTPRequestHandler):
                 if urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get("preview") == ["1"]:
                     cfg = prepared[0]
                     items = [b for p in cfg["pages"] for b in p["buttons"]]
-                    return self.json_response(200, {"title": cfg["title"], "pages": len(cfg["pages"]),
+                    return self.json_response(200, {"title": cfg["title"], "theme": cfg.get("theme", "clasico"), "pages": len(cfg["pages"]),
                         "folders": sum(b["type"] == "folder" for b in items),
                         "widgets": sum(b["type"] == "spotify" for b in items),
                         "buttons": sum(b["type"] == "button" for b in items)})

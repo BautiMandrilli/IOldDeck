@@ -22,7 +22,7 @@ try {
   await cp(path.join(root, 'spotify_bridge.py'), path.join(temporary, 'spotify_bridge.py'));
   await cp(path.join(root, 'public'), path.join(temporary, 'public'), { recursive: true });
   python = spawn(process.env.PYTHON || 'python', ['-u', '-c',
-    'import importlib.util,sys; sys.path.insert(0,sys.argv[2]); from test_spotify import Backend; s=importlib.util.spec_from_file_location("qa",sys.argv[1]); p=importlib.util.module_from_spec(s); s.loader.exec_module(p); p.send_hotkey=lambda value:None; p.webbrowser.open=lambda *a,**k:True; p.launch_uri=lambda uri:None; p.bring_app_forward=lambda slug:None; p.app_installed=lambda scheme:scheme=="discord"; b=Backend(); p.SPOTIFY=p.SpotifyService(lambda:b); h=p.ThreadingHTTPServer(("127.0.0.1",0),p.Handler); print("PORT="+str(h.server_address[1]),flush=True); h.serve_forever()',
+    'import importlib.util,sys; sys.path.insert(0,sys.argv[2]); from test_spotify import Backend; s=importlib.util.spec_from_file_location("qa",sys.argv[1]); p=importlib.util.module_from_spec(s); s.loader.exec_module(p); p.send_hotkey=lambda value:None; p.webbrowser.open=lambda *a,**k:True; p.launch_uri=lambda uri:None; p.bring_app_forward=lambda slug:None; p.app_installed=lambda scheme:scheme=="discord"; p.launch_exe=lambda argv:None; p.riot_client_exe=lambda:None; p.steam_app_installed=lambda appid:False; p.epic_app_installed=lambda name:False; b=Backend(); p.SPOTIFY=p.SpotifyService(lambda:b); h=p.ThreadingHTTPServer(("127.0.0.1",0),p.Handler); print("PORT="+str(h.server_address[1]),flush=True); h.serve_forever()',
     path.join(temporary, 'server.py'), path.join(root, 'tests')], { windowsHide: true });
   let output = '', errors = '';
   python.stdout.on('data', chunk => { output += chunk; });
@@ -153,6 +153,16 @@ try {
     const shot = await cdp('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
     await writeFile(path.join(artifactDir, name), Buffer.from(shot.data, 'base64'));
   }
+  // Theme library: picking a preset themes the preview frame and container, and saves.
+  assert.equal(await evaluate('document.querySelectorAll("#theme-list .theme-option").length'), 6);
+  // Wait for the previous save's response; it replaces the model when it lands.
+  await until(() => evaluate('document.getElementById("save").disabled && !document.querySelector(".save-state").classList.contains("is-dirty")'), 'previous save settled');
+  await delay(300);
+  await evaluate('document.querySelector(".theme-option[data-theme=aurora]").click()');
+  assert.equal(await evaluate('document.querySelector(".device-frame").classList.contains("theme-aurora") && document.getElementById("preview-canvas").classList.contains("canvas-theme-aurora")'), true);
+  assert.equal(await evaluate('document.querySelector(".theme-option.is-selected").getAttribute("data-theme")'), 'aurora');
+  await evaluate('document.getElementById("save").click()');
+  await until(() => evaluate('document.getElementById("editor-message").textContent.indexOf("Cambios guardados")===0'), 'theme save');
   await screenshot('editor-desktop.png');
   // Reload from disk and verify the same folder persists.
   await cdp('Page.reload');
@@ -162,6 +172,7 @@ try {
   await until(() => evaluate('document.querySelectorAll("#pages button[data-id]").length===3'), 'iPad panel');
   // No top bar: the connection pill sits on the page-title line.
   assert.equal(await evaluate('!!document.querySelector(".topbar")'), false);
+  assert.equal(await evaluate('document.documentElement.classList.contains("theme-aurora") && document.querySelector("#pages .dashboard-canvas").classList.contains("canvas-theme-aurora")'), true);
   await until(() => evaluate('document.getElementById("status").className==="status online"'), 'status online');
   assert.equal(await evaluate('document.querySelector("#status .status-text").textContent'), 'Conectado');
   assert.ok(Math.abs(await evaluate('document.getElementById("status").getBoundingClientRect().top - document.querySelector(".page-title").getBoundingClientRect().top')) < 4, 'pill on title line');
@@ -319,9 +330,12 @@ try {
   await cdp('Page.navigate', { url: base + '/' });
   await until(() => evaluate('document.querySelectorAll("#tabs .tab").length===2'), 'page tabs');
   await evaluate('document.querySelectorAll("#tabs .tab")[1].click()');
-  await until(() => evaluate('document.querySelector(".page-title").textContent==="Nueva página" && !document.getElementById("page-track").style.transform'), 'tab page change');
+  await until(() => evaluate('document.querySelector(".page-slide:not([aria-hidden]) .page-title").textContent==="Nueva página" && Math.abs(document.querySelector(".page-slide:not([aria-hidden])").getBoundingClientRect().left-20)<0.6'), 'tab page change');
+  // Every page is built once: the strip holds both slides and is not rebuilt by switching.
+  assert.equal(await evaluate('document.querySelectorAll("#page-track .page-slide").length'), 2);
+  await evaluate('window.trackNode=document.getElementById("page-track")');
   assert.equal(await evaluate('document.querySelectorAll("#tabs .tab")[1].className.indexOf("selected")>=0'), true);
-  assert.equal(await evaluate('!!document.querySelector("#pages button[data-id] svg.app-icon")'), true);
+  assert.equal(await evaluate('!!document.querySelector(".page-slide:not([aria-hidden]) button[data-id] svg.app-icon")'), true);
   const savedApp = (await (await fetch(base + '/api/config', { headers: { 'X-Panel-Token': token } })).json()).pages[1].buttons[0];
   assert.equal(savedApp.builtinIcon, 'app:youtube');
   assert.equal(savedApp.value, 'https://www.youtube.com/');
@@ -342,10 +356,11 @@ try {
     await cdp('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   }
   await swipe(400, 440, 4);
-  await until(() => evaluate('!document.getElementById("page-track").style.transform'), 'spring back');
-  assert.equal(await evaluate('document.querySelector(".page-title").textContent'), 'Nueva página');
+  await until(() => evaluate('Math.abs(document.querySelector(".page-slide:not([aria-hidden])").getBoundingClientRect().left-20)<0.6'), 'spring back');
+  assert.equal(await evaluate('document.querySelector(".page-slide:not([aria-hidden]) .page-title").textContent'), 'Nueva página');
   await swipe(200, 620, 8);
-  await until(() => evaluate('document.querySelector(".page-title").textContent==="Inicio" && !document.getElementById("page-track").style.transform'), 'swipe to previous page');
+  await until(() => evaluate('document.querySelector(".page-slide:not([aria-hidden]) .page-title").textContent==="Inicio" && Math.abs(document.querySelector(".page-slide:not([aria-hidden])").getBoundingClientRect().left-20)<0.6'), 'swipe to previous page');
+  assert.equal(await evaluate('window.trackNode===document.getElementById("page-track")'), true, 'page change must not rebuild the DOM');
   assert.equal(await evaluate('document.querySelectorAll("#tabs .tab")[0].className.indexOf("selected")>=0'), true);
   assert.deepEqual(browserErrors, []);
   console.log('Browser passed: editor, simplified controls, folder CRUD, save/reload, iPad panel, folder action/feedback/polling, Escape/focus and binary backup/restore. Screenshots in .cache/.');

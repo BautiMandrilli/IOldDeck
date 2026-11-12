@@ -211,8 +211,35 @@
       }
     });
   }
-  function background(canvas, page) {
-    canvas.style.backgroundColor = page.backgroundColor;
+  // Panel-wide themes: the page background (html / editor device frame) and the
+  // button container (canvas). Mirrored in server.py THEMES; CSS in style.css.
+  var themes = [
+    { id: "clasico", name: "Clásico" },
+    { id: "medianoche", name: "Medianoche" },
+    { id: "aurora", name: "Aurora" },
+    { id: "carbono", name: "Carbono" },
+    { id: "atardecer", name: "Atardecer" },
+    { id: "oceano", name: "Océano" }
+  ];
+  function themeId(id) {
+    for (var i = 0; i < themes.length; i++) if (themes[i].id === id) return id;
+    return "clasico";
+  }
+  // Swaps the theme-* class on any element (html, device frame, swatch).
+  function applyTheme(el, id, prefix) {
+    prefix = prefix || "theme-";
+    var kept = (el.getAttribute("class") || "").split(/\s+/).filter(function (c) {
+      return c && !(c.indexOf(prefix) === 0 && themeId(c.slice(prefix.length)) === c.slice(prefix.length));
+    });
+    id = themeId(id);
+    if (id !== "clasico") kept.push(prefix + id);
+    el.setAttribute("class", kept.join(" "));
+  }
+  function background(canvas, page, theme) {
+    theme = themeId(theme);
+    applyTheme(canvas, theme, "canvas-theme-");
+    // A theme paints the container; "Clásico" keeps each page's own colour.
+    canvas.style.backgroundColor = theme === "clasico" ? page.backgroundColor : "";
     var bg = document.createElement("div"); bg.className = "canvas-background bg-" + page.backgroundAnimation;
     if (page.backgroundImage) bg.style.backgroundImage = "url('" + page.backgroundImage + "')";
     canvas.appendChild(bg);
@@ -231,5 +258,5 @@
   }
   // Size in design pixels of a span of n grid boxes.
   function span(n) { return n * CELL + (n - 1) * GAP; }
-  root.PanelLayout = { findApp: findApp, grid: { width: WIDTH, pad: PAD, gap: GAP, cell: CELL, cols: 6, rows: 4 }, span: span, items: items, layout: layout, paint: paint, background: background, position: position, fit: fit, icons: icons, symbol: symbol };
+  root.PanelLayout = { findApp: findApp, grid: { width: WIDTH, pad: PAD, gap: GAP, cell: CELL, cols: 6, rows: 4 }, span: span, items: items, layout: layout, paint: paint, background: background, position: position, fit: fit, icons: icons, symbol: symbol, themes: themes, themeId: themeId, applyTheme: applyTheme };
 }(this));

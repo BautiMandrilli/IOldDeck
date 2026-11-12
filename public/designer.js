@@ -302,6 +302,7 @@
     root.appendChild(field("Nombre de la página", "text", p.title, function (v) { p.title = v; drawPageList(); }));
     root.appendChild(segmented("Distribución", [["grid", "Cuadrícula"], ["free", "Libre"]], p.layout, function (v) { p.layout = v; drawPageControls(); drawButtonControls(); }));
     root.appendChild(field("Color del fondo", "color", p.backgroundColor, function (v) { p.backgroundColor = v; }));
+    if (PanelLayout.themeId(model.theme) !== "clasico") root.appendChild(el("p", "hint", "El tema del panel pinta el fondo de los botones. Elegí «Clásico» para usar este color."));
     root.appendChild(assetPicker("Imagen de fondo", p.backgroundImage, function (v) { p.backgroundImage = v; }));
     var more = advancedSection(root, "Más ajustes de página");
     more.appendChild(field("Alto del lienzo libre (px)", "number", p.height, function (v) { p.height = clamp(v, 400, 1400); }, 400, 1400));
@@ -602,14 +603,18 @@
       canvas.insertBefore(guides, bg ? bg.nextSibling : canvas.firstChild);
     }
   }
+  // Narrow stage: icon-only dock (< 1040px) and no "Probar panel" link (< 720px).
+  function fitStage() {
+    var stage = document.querySelector(".stage");
+    stage.classList.toggle("is-compact", stage.clientWidth < 1040);
+    stage.classList.toggle("is-narrow", stage.clientWidth < 720);
+  }
   // Moves existing tiles to a new layout; CSS animates the change while resizing.
   function reflow() {
     var canvas = $("preview-canvas"), layout = PanelLayout.layout(page(), folderId);
     layout.items.forEach(function (item) { var n = nodeFor(item.id); if (n) PanelLayout.position(n, layout.boxes[item.id]); });
     scale = PanelLayout.fit($("preview-shell"), canvas, layout.height);
-    var stage = document.querySelector(".stage");
-    stage.classList.toggle("is-compact", stage.clientWidth < 1040);
-    stage.classList.toggle("is-narrow", stage.clientWidth < 720);
+    fitStage();
     drawGuides(canvas, layout);
   }
   // ---------- Preview ----------
@@ -672,7 +677,8 @@
     if (!currentFolder) folderId = "";
     clear(canvas);
     var layout = PanelLayout.layout(p, folderId);
-    PanelLayout.background(canvas, p);
+    PanelLayout.background(canvas, p, model.theme);
+    PanelLayout.applyTheme(document.querySelector(".device-frame"), model.theme);
     drawGuides(canvas, layout);
     layout.items.forEach(function (b) { renderButton(b, canvas, layout.boxes[b.id], layout.grid); });
     if (!layout.items.length) canvas.appendChild(el("p", "canvas-empty", folderId ? "Carpeta vacía · agregá un botón" : "Agregá un botón para empezar"));
@@ -688,6 +694,7 @@
     $("stage-hint").textContent = layout.grid
       ? "Arrastrá para reordenar · Arrastrá la esquina para ocupar más casillas · Doble clic en una carpeta para abrirla"
       : "Arrastrá para mover · Las esquinas cambian el tamaño y se ajustan a las casillas · Alt para mover sin imán";
+    fitStage();
     scale = PanelLayout.fit($("preview-shell"), canvas, layout.height);
     Motion.glide(canvas, before, scale);
   }
@@ -820,9 +827,32 @@
     document.addEventListener("mousemove", move); document.addEventListener("mouseup", end);
   }
 
+  // Theme library: a swatch per preset showing its page and container backgrounds.
+  function drawThemes() {
+    var root = $("theme-list"); clear(root);
+    var current = PanelLayout.themeId(model.theme);
+    PanelLayout.themes.forEach(function (t) {
+      var option = el("button", "theme-option" + (t.id === current ? " is-selected" : ""));
+      option.type = "button"; option.setAttribute("data-theme", t.id);
+      option.setAttribute("aria-pressed", t.id === current ? "true" : "false");
+      var swatch = el("span", "theme-swatch"); PanelLayout.applyTheme(swatch, t.id);
+      var inner = el("span", "theme-swatch-canvas"); PanelLayout.applyTheme(inner, t.id, "canvas-theme-");
+      if (t.id === "clasico") inner.style.backgroundColor = page().backgroundColor;
+      for (var i = 0; i < 3; i++) inner.appendChild(el("span", "theme-swatch-tile"));
+      swatch.appendChild(inner); option.appendChild(swatch);
+      option.appendChild(el("span", "theme-name", t.name));
+      option.onclick = function () {
+        if (PanelLayout.themeId(model.theme) === t.id) return;
+        model.theme = t.id; changed(); drawThemes(); drawPageControls(); drawPreview();
+      };
+      root.appendChild(option);
+    });
+  }
+
   // ---------- Commands ----------
   function drawAll(before) {
     $("panel-title").value = model.title;
+    drawThemes();
     drawPageList(); drawPageControls(); drawButtonControls(); drawPreview(before);
   }
   function addButton(kind) {
@@ -895,8 +925,16 @@
   function save() {
     if (!model || !dirty) return;
     $("save").disabled = true;
+    var sent = JSON.stringify(model);
     request("POST", "/api/config", model, function (err, data) {
       if (err) { $("save").disabled = false; message(err, "error"); return; }
+      if (JSON.stringify(model) !== sent) {
+        // Edited while saving: keep the newer edits (still pending) instead of the server copy.
+        savedJSON = JSON.stringify(data);
+        setDirty(JSON.stringify(model) !== savedJSON);
+        message("Cambios guardados. Hay cambios nuevos sin guardar.", "info");
+        return;
+      }
       model = data;
       savedJSON = JSON.stringify(model);
       if (history[history.length - 1] !== savedJSON) history.push(savedJSON);

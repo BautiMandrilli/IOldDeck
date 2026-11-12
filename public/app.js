@@ -20,12 +20,17 @@
   var pairing = false;
   var TRANSIENT = ["is-pressed", "is-busy", "did-fire", "did-fail"];
 
-  // Horizontal offset of the current page; driven by touch, then by a spring.
-  var offset = 0, swipe = null;
+  // Every page is built once, side by side, in one strip (#page-track). Swiping only
+  // moves that strip on the GPU: nothing is rebuilt mid-animation, which is what made
+  // the iPad 2 freeze, rush and slow down. offset = drag of the active page.
+  var offset = 0, swipe = null, step = 0, PAGE_GAP = 40;
   var spring = new Motion.Spring(function (x) {
     offset = x;
     var track = $("page-track");
-    if (track) Motion.transform(track, Math.abs(x) < 0.01 ? "" : "translate3d(" + x + "px,0,0)");
+    if (!track) return;
+    Motion.transform(track, "translate3d(" + (Math.round((x - active * step) * 10) / 10) + "px,0,0)");
+    var panel = $("pages");
+    if (panel.scrollLeft) panel.scrollLeft = 0;  // focus() on another page must not scroll the strip
   });
 
   function $(id) { return document.getElementById(id); }
@@ -70,7 +75,7 @@
     "server-error": ["Error del servidor", "El servidor respondió con un error. Revisá su ventana en la PC."],
     unpaired: ["Sin vincular", "Escribí el código de 6 números que muestra la PC."]
   };
-  var connection = "connecting", everConnected = false, failures = 0;
+  var connection = "connecting", everConnected = false, failures = 0, theme = "clasico";
   function setConnection(state) {
     if (state === connection) return;
     connection = state;
@@ -135,23 +140,22 @@
   }
   // Repaint in place: the nodes (and any touch in progress) are kept.
   function refreshButtons() {
-    var page = pages[active];
-    if (!page) return;
+    var byId = {};
+    pages.forEach(function (page) { page.buttons.forEach(function (item) { byId[item.id] = { item: item, page: page }; }); });
     var nodes = document.querySelectorAll("button[data-id]");
     for (var i = 0; i < nodes.length; i++) {
-      var id = nodes[i].getAttribute("data-id");
-      for (var j = 0; j < page.buttons.length; j++) if (page.buttons[j].id === id) {
-        var item = page.buttons[j], on = item.feedback.mode === "toggle" && states[id] === true;
-        nodes[i].className = itemClass(item, on, nodes[i]);
-        PanelLayout.paint(nodes[i], item, page, on);
-      }
+      var found = byId[nodes[i].getAttribute("data-id")];
+      if (!found || found.item.feedback.mode !== "toggle") continue;
+      var on = states[found.item.id] === true;
+      nodes[i].className = itemClass(found.item, on, nodes[i]);
+      PanelLayout.paint(nodes[i], found.item, found.page, on);
     }
   }
   function renderCanvas(page, parent, folderId) {
     var shell = document.createElement("div"); shell.className = "canvas-shell";
     var canvas = document.createElement("div"); canvas.className = "dashboard-canvas";
     var layout = PanelLayout.layout(page, folderId);
-    if (!folderId) PanelLayout.background(canvas, page);
+    if (!folderId) PanelLayout.background(canvas, page, theme);
     layout.items.forEach(function (item) {
       var button = document.createElement(item.type === "spotify" ? "div" : "button");
       if (item.type !== "spotify") button.type = "button";
@@ -281,18 +285,35 @@
     }
     selectTab(active);
   }
+  function pageWidth() {
+    var panel = $("pages"), style = window.getComputedStyle(panel);
+    return panel.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+  }
   function draw() {
     var panel = $("pages");
     clear(panel);
     if (!pages.length) return;
-    var page = pages[active];
+    var width = pageWidth();
+    step = width + PAGE_GAP;
     var track = document.createElement("div"); track.id = "page-track"; track.className = "page-track";
-    var heading = document.createElement("h2"); heading.className = "page-title"; heading.textContent = page.title;
-    track.appendChild(heading); panel.appendChild(track);
-    renderCanvas(page, track, "");
+    panel.appendChild(track);
+    pages.forEach(function (page, index) {
+      var slide = document.createElement("section"); slide.className = "page-slide";
+      slide.style.width = width + "px";
+      if (index !== active) slide.setAttribute("aria-hidden", "true");
+      var heading = document.createElement("h2"); heading.className = "page-title"; heading.textContent = page.title;
+      slide.appendChild(heading); track.appendChild(slide);
+      renderCanvas(page, slide, "");
+    });
     spring.onUpdate(offset);
     drawTabs();
     drawFolder();
+  }
+  function markActiveSlide() {
+    var slides = document.querySelectorAll(".page-slide");
+    for (var i = 0; i < slides.length; i++) {
+      if (i === active) slides[i].removeAttribute("aria-hidden"); else slides[i].setAttribute("aria-hidden", "true");
+    }
   }
 
   // Page changes: the old page leaves toward where the finger was going, the new one
@@ -303,15 +324,14 @@
   }
   function goTo(index, velocity) {
     if (index === active || index < 0 || index >= pages.length) { settleBack(velocity); return; }
-    var dir = index > active ? 1 : -1, width = $("pages").clientWidth || window.innerWidth;
     closeFolder(true);
-    selectTab(index);
-    spring.to(-dir * width, { velocity: velocity, response: 0.26, onRest: function () {
-      active = index;
-      draw();
-      spring.set(dir * width);
-      spring.to(0, { velocity: velocity, response: 0.4 });
-    } });
+    // Re-base the offset on the new page so the strip keeps its exact position,
+    // then spring it home in one continuous motion.
+    var rebased = offset + (index - active) * step;
+    active = index;
+    spring.stop(); spring.set(rebased);
+    selectTab(index); markActiveSlide();
+    spring.to(0, { velocity: velocity, response: 0.42 });
   }
   (function swipeBetweenPages() {
     var area = $("pages");
@@ -382,6 +402,8 @@
       if (err) { if (status) showMessage(err, "error"); return; }
       showPair(false);
       document.title = data.title;
+      theme = PanelLayout.themeId(data.theme);
+      PanelLayout.applyTheme(document.documentElement, theme);
       var nextSignature = JSON.stringify(data);
       if (signature === nextSignature) return;
       signature = nextSignature;
