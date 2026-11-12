@@ -29,6 +29,7 @@ Before starting a server, check whether port 8765 is already in use (often `npm 
 - **`public/app-icons.js`** — generated app-logo library (`window.PanelAppIcons`, Simple Icons CC0). Regenerate/extend via `scripts/build-app-icons.mjs` (edit its `APPS` list; it needs an extracted `simple-icons` package path). Buttons reference a logo as `builtinIcon: "app:<slug>"`; `server.py` accepts that pattern and `PanelLayout.symbol()` renders it as an iOS-style icon.
 - New files in `public/` must be added to the static-file whitelist in `Handler.do_GET` (`server.py`), or they 404.
 - **`public/app.js` + `index.html`** — iPad panel. **`public/designer.js` + `editor.html`** — PC editor (pending changes, drag/resize, backups). **`public/spotify.js`** — polling, partial DOM updates, authenticated artwork via XHR blob. **`public/dev-reload.js`** — only injected when `PANEL_DEV=1`.
+- **Desktop apps** — button action `"app"` with `value` = a slug from `DESKTOP_APPS` in `server.py` (fixed allowlist; never accept arbitrary URI schemes). `open_app()` launches the registered link (`discord://`, `steam://`…) via `os.startfile` when the scheme is in the registry, else opens the web fallback; `bring_app_forward()` then restores/raises the app window from a background thread. Tests must stub `launch_uri` and `bring_app_forward` so they never open or move real windows.
 - **`spotify_bridge.py`** — Windows.Media.Control via PyWinRT on its own daemon thread with its own asyncio loop (MTA). Lazily started; publishes a locked snapshot polled every 2s. Never move WinRT objects onto HTTP request threads; keep waits bounded. Missing deps/WinRT failure must not break normal buttons.
 
 ### Config model
@@ -49,3 +50,14 @@ Six-digit pairing code printed at startup (regenerated each restart) → persist
 - `data/` is personal and gitignored — never commit it, reset it, or touch it from tests. Tests copy `server.py` into a temp dir before importing it.
 - Avoid real Spotify control in tests; if needed, restore the original playback state.
 - Report clearly what was verified mocked vs. on real Windows vs. on the physical iPad (no physical iPad test has been done yet).
+
+## Commits
+
+Use [Conventional Commits](https://www.conventionalcommits.org/), written in English:
+
+- Subject: `<type>: <summary>` — imperative, lowercase after the colon, no trailing period, ~72 chars max. Optional scope, e.g. `feat(editor): …`, `fix(spotify): …`.
+- Types: `feat` (user-visible feature), `fix` (bug fix), `style`/`refactor` (no behavior change), `test`, `docs`, `chore` (tooling, deps, generated files).
+- Always include a body after a blank line: what changed and why, grouped by area (iPad panel, Editor, Server, Tests) as `-` bullet lists. Note anything not yet verified (e.g. "Not yet verified on a physical iPad 2").
+- End with the co-author trailer when Claude helped, e.g. `Co-Authored-By: Claude <noreply@anthropic.com>`.
+- Run `npm test` (and `node tests/browser_smoke.mjs` for UI changes) before committing; run `git diff --cached --check`.
+- Commit only when the user asks. Work on a feature branch (e.g. `feat/<topic>`), not directly on `main`; never push without being asked.

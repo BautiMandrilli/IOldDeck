@@ -3,6 +3,7 @@
   var token = localStorage.getItem("panel_token") || "";
   var model = null;
   var assets = [];
+  var desktopApps = [];
   var pageIndex = 0;
   var selectedId = null;
   var scale = 1;
@@ -123,8 +124,25 @@
       if (pageIndex >= model.pages.length) pageIndex = 0;
       resetHistory();
       loadAssets();
+      loadDesktopApps();
       drawAll();
     });
+  }
+  // Desktop apps the server can open directly, with whether each is installed on this PC.
+  function loadDesktopApps() {
+    request("GET", "/api/desktop-apps", null, function (err, data) {
+      if (!err) { desktopApps = data.apps; drawButtonControls(); }
+    });
+  }
+  function desktopApp(slug) {
+    for (var i = 0; i < desktopApps.length; i++) if (desktopApps[i].slug === slug) return desktopApps[i];
+    return null;
+  }
+  function defaultDesktopApp(b) {
+    var fromIcon = b.builtinIcon && b.builtinIcon.indexOf("app:") === 0 ? desktopApp(b.builtinIcon.slice(4)) : null;
+    if (fromIcon) return fromIcon.slug;
+    for (var i = 0; i < desktopApps.length; i++) if (desktopApps[i].installed) return desktopApps[i].slug;
+    return "discord";
   }
   function loadAssets() {
     request("GET", "/api/assets", null, function (err, data) {
@@ -323,10 +341,14 @@
     if (b.iconSize < 56) b.iconSize = 64;
     if (DEFAULT_LABELS.indexOf(b.label) >= 0 || (previous && b.label === previous.name)) b.label = app.name;
     if (b.backgroundColor === "#0a84ff") b.backgroundColor = "#1c1c1e";
-    var linked = link && app.url && b.type === "button";
-    if (linked) { b.action = "url"; b.value = app.url; }
+    // Prefer the installed desktop app; otherwise the button opens the website.
+    var desktop = desktopApp(app.slug), opens = "";
+    if (link && b.type === "button") {
+      if (desktop && desktop.installed) { b.action = "app"; b.value = app.slug; opens = "la app de la PC"; }
+      else if (app.url) { b.action = "url"; b.value = app.url; opens = shortUrl(app.url); }
+    }
     changed(); drawButtonControls(); drawPreview();
-    message(app.name + " aplicado" + (linked ? " · abre " + shortUrl(app.url) : ""), "success");
+    message(app.name + " aplicado" + (opens ? " · abre " + opens : ""), "success");
   }
   // Searchable grid of real app logos, grouped by category like a Home Screen.
   function appLibrary(b) {
@@ -357,9 +379,9 @@
     box.appendChild(grid);
     if (b.type === "button") {
       var row = el("label", "check-row");
-      check = document.createElement("input"); check.type = "checkbox"; check.checked = b.action === "url";
+      check = document.createElement("input"); check.type = "checkbox"; check.checked = b.action !== "hotkey";
       row.appendChild(check);
-      row.appendChild(el("span", "", "Al elegir una app, el botón abre su página"));
+      row.appendChild(el("span", "", "Al elegir una app, el botón la abre (la app instalada en la PC o, si no está, su página web)"));
       box.appendChild(row);
     }
     render();
@@ -451,10 +473,20 @@
 
     if (b.type === "button") {
       var action = group(root, "Acción", "accion");
-      action.appendChild(segmented("Al tocar", [["hotkey", "Atajo de teclado"], ["url", "Abrir página"]], b.action, function (v) {
-        b.action = v; b.value = v === "hotkey" ? "ctrl+shift+m" : "https://www.google.com/"; drawButtonControls();
+      action.appendChild(segmented("Al tocar", [["hotkey", "Atajo"], ["url", "Página web"], ["app", "App de la PC"]], b.action, function (v) {
+        b.action = v;
+        b.value = v === "hotkey" ? "ctrl+shift+m" : v === "url" ? "https://www.google.com/" : defaultDesktopApp(b);
+        drawButtonControls();
       }));
-      action.appendChild(field(b.action === "hotkey" ? "Atajo (ej. ctrl+shift+m)" : "Dirección (https://…)", "text", b.value, function (v) { b.value = v; }));
+      if (b.action === "app") {
+        action.appendChild(choice("App", desktopApps.map(function (app) {
+          return [app.slug, app.name + (app.installed ? " · instalada" : " · no encontrada")];
+        }), b.value, function (v) { b.value = v; drawButtonControls(); }));
+        var chosen = desktopApp(b.value);
+        action.appendChild(el("p", "hint", chosen && !chosen.installed
+          ? chosen.name + " no está instalada en esta PC: el botón abrirá " + shortUrl(chosen.web) + " en el navegador hasta que la instales."
+          : "Abre la app instalada en esta PC, no el navegador. Si la desinstalás, abre su página web."));
+      } else action.appendChild(field(b.action === "hotkey" ? "Atajo (ej. ctrl+shift+m)" : "Dirección (https://…)", "text", b.value, function (v) { b.value = v; }));
     }
     var place = group(root, b.type === "folder" ? "Carpeta" : "Ubicación", "ubicacion");
     if (b.type !== "folder") {
@@ -573,10 +605,12 @@
   }
   // ---------- Preview ----------
   function addHandles(node) {
-    (isGrid() ? ["span"] : ["left", "right"]).forEach(function (side) {
-      var handle = el("span", "resize-handle " + (side === "span" ? "right" : side));
-      handle.setAttribute("data-handle", side);
-      handle.title = side === "span" ? "Arrastrá para ocupar más o menos casillas" : "Arrastrá para cambiar el tamaño";
+    // One handle per corner: tl, tr, bl, br. In grid pages they change the boxes the tile spans.
+    var grid = isGrid();
+    ["tl", "tr", "bl", "br"].forEach(function (corner) {
+      var handle = el("span", "resize-handle " + corner);
+      handle.setAttribute("data-handle", (grid ? "span-" : "") + corner);
+      handle.title = grid ? "Arrastrá para ocupar más o menos casillas" : "Arrastrá para cambiar el tamaño";
       node.appendChild(handle);
     });
   }
@@ -613,7 +647,7 @@
     node.className = "action-canvas designer-button animate-" + b.animation + (b.id === selectedId ? " is-selected" : "") + (activeState ? " feedback-active" : "");
     node.setAttribute("data-id", b.id);
     PanelLayout.position(node, box); PanelLayout.paint(node, b, page(), activeState);
-    if (b.type === "spotify") node.querySelector(".spotify-status").textContent = "Vista previa · los controles funcionan en el panel";
+    if (b.type === "spotify") node.querySelector(".spotify-status").textContent = "";
     if (b.id === selectedId) addHandles(node);
     node.onmousedown = function (event) { beginDrag(event, b); };
     node.onclick = function () { select(b.id); };
@@ -661,7 +695,7 @@
     event.preventDefault();
     select(b.id);
     var handle = event.target.getAttribute("data-handle") || "move";
-    if (handle === "span") { beginSpanResize(event, b); return; }
+    if (handle.indexOf("span-") === 0) { beginSpanResize(event, b, handle.slice(5)); return; }
     if (isGrid()) { beginGridDrag(event, b); return; }
     var node = nodeFor(b.id), canvas = $("preview-canvas"), badge = null;
     var startX = event.clientX, startY = event.clientY, moved = false;
@@ -681,10 +715,18 @@
         b.x = Math.round(clamp(x, 0, width - b.w));
         b.y = Math.round(clamp(y, 0, height - b.h));
       } else {
-        h = origin.h + dy;
-        if (magnet) { hit = nearest(origin.y + h, gridLines(height, G.cell)); if (hit !== null) h = hit - origin.y; }
-        b.h = Math.round(clamp(h, minH, height - origin.y));
-        if (handle === "right") {
+        // The opposite corner stays fixed; top/left corners move the start edge.
+        if (handle.charAt(0) === "t") {
+          var top = origin.y + dy;
+          if (magnet) { hit = nearest(top, gridLines(height, 0)); if (hit !== null) top = hit; }
+          b.y = Math.round(clamp(top, 0, origin.y + origin.h - minH));
+          b.h = origin.h + origin.y - b.y;
+        } else {
+          h = origin.h + dy;
+          if (magnet) { hit = nearest(origin.y + h, gridLines(height, G.cell)); if (hit !== null) h = hit - origin.y; }
+          b.h = Math.round(clamp(h, minH, height - origin.y));
+        }
+        if (handle.charAt(1) === "r") {
           w = origin.w + dx;
           if (magnet) { hit = nearest(origin.x + w, gridLines(width, G.cell)); if (hit !== null) w = hit - origin.x; }
           b.w = Math.round(clamp(w, minW, width - origin.x));
@@ -709,15 +751,17 @@
     document.addEventListener("mousemove", move);
     document.addEventListener("mouseup", end);
   }
-  // Grid corner handle: the tile grows box by box and the others make room live.
-  function beginSpanResize(event, b) {
+  // Grid corner handles: the tile grows box by box and the others make room live.
+  // Dragging away from the tile grows it from any corner; the grid keeps its slot.
+  function beginSpanResize(event, b, corner) {
+    var sx = corner.charAt(1) === "l" ? -1 : 1, sy = corner.charAt(0) === "t" ? -1 : 1;
     var canvas = $("preview-canvas"), node = nodeFor(b.id), startX = event.clientX, startY = event.clientY;
     var box = PanelLayout.layout(page(), folderId).boxes[b.id], before = [b.cols || 1, b.rows || 1];
     var minC = b.type === "spotify" ? 3 : 1, minR = b.type === "spotify" ? 2 : 1;
     var badge = el("span", "span-badge", before[0] + " × " + before[1]);
     canvas.classList.add("is-resizing"); node.appendChild(badge);
     function move(e) {
-      var w = box.w + (e.clientX - startX) / scale, h = box.h + (e.clientY - startY) / scale;
+      var w = box.w + sx * (e.clientX - startX) / scale, h = box.h + sy * (e.clientY - startY) / scale;
       var c = clamp(Math.round((w + G.gap) / STEP), minC, G.cols), r = clamp(Math.round((h + G.gap) / STEP), minR, G.rows);
       badge.textContent = c + " × " + r;
       if (c === (b.cols || 1) && r === (b.rows || 1)) return;

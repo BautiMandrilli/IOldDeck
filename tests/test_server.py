@@ -112,6 +112,32 @@ class TestPanelServer(unittest.TestCase):
             self.assertEqual(result.code, 200)
             browser.assert_called_once_with("https://www.google.com/", new=2)
 
+    def test_desktop_app_opens_installed_app_or_website(self):
+        cfg = self.folder_config()
+        cfg["pages"][0]["buttons"][2].update(action="app", value="discord")
+        self.panel.CONFIG_FILE.write_text(json.dumps(cfg), encoding="utf-8")
+        with mock.patch.object(self.panel, "launch_uri") as launch, \
+                mock.patch.object(self.panel, "bring_app_forward") as forward, \
+                mock.patch.object(self.panel.webbrowser, "open") as browser:
+            with mock.patch.object(self.panel, "app_installed", return_value=True):
+                result = self.request("/api/action", b'{"id":"google"}')
+            self.assertEqual((result.code, result.value["opened"]), (200, "app"))
+            launch.assert_called_once_with("discord://-/")
+            forward.assert_called_once_with("discord")
+            browser.assert_not_called()
+            with mock.patch.object(self.panel, "app_installed", return_value=False):
+                result = self.request("/api/action", b'{"id":"google"}')
+            self.assertEqual(result.value["opened"], "web")
+            browser.assert_called_once_with("https://discord.com/app", new=2)
+            self.assertEqual((launch.call_count, forward.call_count), (1, 1))
+
+    def test_desktop_app_rejects_unknown_or_raw_schemes(self):
+        cfg = self.folder_config()
+        for value in ("calc", "ms-msdt:/id", "file:///C:/Windows/System32/cmd.exe", ""):
+            cfg["pages"][0]["buttons"][2].update(action="app", value=value)
+            with self.assertRaises(ValueError):
+                self.panel.validate(cfg)
+
     def test_icon_presentation_persists_and_legacy_keeps_labels(self):
         cfg = self.folder_config()
         button = cfg["pages"][0]["buttons"][0]

@@ -73,7 +73,7 @@
     for (var i = 0; i < list.length; i++) {
       list[i].querySelector(".spotify-title").textContent = s.title || "Spotify en tu PC";
       list[i].querySelector(".spotify-artist").textContent = s.artist || "";
-      list[i].querySelector(".spotify-status").textContent = s.message || (s.playing ? "Reproduciendo en esta PC" : "En pausa");
+      list[i].querySelector(".spotify-status").textContent = s.message || "";
       var buttons = list[i].querySelectorAll(".spotify-control");
       for (var j = 0; j < buttons.length; j++) {
         var command = buttons[j].getAttribute("data-command");

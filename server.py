@@ -162,8 +162,10 @@ def validate(raw):
                 raise ValueError("No se permiten subcarpetas")
             action = kind if kind in ("folder", "spotify") else str(button.get("action", ""))
             value = str(button.get("value", ""))[:500].strip()
-            if action not in ("hotkey", "url", "folder", "spotify") or (kind == "button" and action in ("folder", "spotify")):
+            if action not in ("hotkey", "url", "app", "folder", "spotify") or (kind == "button" and action in ("folder", "spotify")):
                 raise ValueError("Acción desconocida")
+            if action == "app" and value not in DESKTOP_APPS:
+                raise ValueError("App de la PC desconocida: " + value)
             if action == "url" and (urllib.parse.urlparse(value).scheme not in ("http", "https") or not urllib.parse.urlparse(value).netloc):
                 raise ValueError("La página debe comenzar con http:// o https://")
             if action == "hotkey" and not valid_hotkey(value):
@@ -376,6 +378,167 @@ def send_hotkey(value):
         user32.keybd_event(code, 0, 2, 0)
 
 
+# Desktop apps that register a link type in Windows: opening that link launches the
+# installed app instead of the browser. Fixed list on purpose — the panel never opens
+# arbitrary URI schemes, since some Windows handlers can run code.
+# slug: (name, registry scheme, link that opens the app, web fallback,
+#        process names that own its main window, exact main-window title or None)
+DESKTOP_APPS = {
+    "discord": ("Discord", "discord", "discord://-/", "https://discord.com/app", ("discord.exe", "discordptb.exe", "discordcanary.exe"), None),
+    "spotify": ("Spotify", "spotify", "spotify:", "https://open.spotify.com/", ("spotify.exe",), None),
+    "steam": ("Steam", "steam", "steam://open/main", "https://store.steampowered.com/", ("steamwebhelper.exe", "steam.exe"), "Steam"),
+    "epicgames": ("Epic Games", "com.epicgames.launcher", "com.epicgames.launcher://store", "https://store.epicgames.com/", ("epicgameslauncher.exe",), None),
+    "telegram": ("Telegram", "tg", "tg://", "https://web.telegram.org/", ("telegram.exe",), None),
+    "whatsapp": ("WhatsApp", "whatsapp", "whatsapp://", "https://web.whatsapp.com/", ("whatsapp.exe", "whatsapp.root.exe"), None),
+    "zoom": ("Zoom", "zoommtg", "zoommtg://", "https://app.zoom.us/", ("zoom.exe",), None),
+    "notion": ("Notion", "notion", "notion://", "https://www.notion.so/", ("notion.exe",), None),
+    "figma": ("Figma", "figma", "figma://", "https://www.figma.com/", ("figma.exe",), None),
+    "claude": ("Claude", "claude", "claude://", "https://claude.ai/", ("claude.exe",), None),
+}
+
+
+def app_installed(scheme):
+    if os.name != "nt":
+        return False
+    import winreg
+    try:
+        with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, scheme) as key:
+            winreg.QueryValueEx(key, "URL Protocol")
+        return True
+    except OSError:
+        return False
+
+
+def launch_uri(uri):
+    os.startfile(uri)
+
+
+def _process_name(hwnd):
+    from ctypes import wintypes
+    pid = wintypes.DWORD()
+    ctypes.windll.user32.GetWindowThreadProcessId(wintypes.HWND(hwnd), ctypes.byref(pid))
+    kernel32 = ctypes.windll.kernel32
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    handle = kernel32.OpenProcess(0x1000, False, pid.value)  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not handle:
+        return ""
+    try:
+        size = wintypes.DWORD(1024)
+        buffer = ctypes.create_unicode_buffer(size.value)
+        if not kernel32.QueryFullProcessImageNameW(handle, 0, buffer, ctypes.byref(size)):
+            return ""
+        return os.path.basename(buffer.value).lower()
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+class _WindowPlacement(ctypes.Structure):
+    _fields_ = [("length", ctypes.c_uint), ("flags", ctypes.c_uint), ("showCmd", ctypes.c_uint),
+                ("minPosition", ctypes.c_long * 2), ("maxPosition", ctypes.c_long * 2),
+                ("normalPosition", ctypes.c_long * 4)]
+
+
+def find_app_window(exe_names, title=None):
+    """Largest visible top-level window (minimized included) owned by one of exe_names."""
+    from ctypes import wintypes
+    user32 = ctypes.windll.user32
+    found = []
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def visit(raw, _param):
+        hwnd = wintypes.HWND(raw)
+        if not user32.IsWindowVisible(hwnd) or user32.GetWindow(hwnd, 4):  # skip hidden and owned windows
+            return True
+        length = user32.GetWindowTextLengthW(hwnd)
+        if not length:
+            return True
+        text = ctypes.create_unicode_buffer(length + 1)
+        user32.GetWindowTextW(hwnd, text, length + 1)
+        if (title and text.value != title) or _process_name(raw) not in exe_names:
+            return True
+        placement = _WindowPlacement()
+        placement.length = ctypes.sizeof(placement)
+        user32.GetWindowPlacement(hwnd, ctypes.byref(placement))
+        left, top, right, bottom = placement.normalPosition
+        found.append(((right - left) * (bottom - top), raw))
+        return True
+
+    user32.EnumWindows(visit, 0)
+    return max(found)[1] if found else None
+
+
+def bring_to_front(hwnd):
+    """Restores a minimized window and puts it in front of the user."""
+    from ctypes import wintypes
+    user32, kernel32 = ctypes.windll.user32, ctypes.windll.kernel32
+    user32.GetForegroundWindow.restype = wintypes.HWND
+    target = wintypes.HWND(hwnd)
+    user32.ShowWindow(target, 9 if user32.IsIconic(target) else 5)  # SW_RESTORE / SW_SHOW
+    # Windows only lets the foreground app hand over focus. Borrow its input queue for a moment.
+    foreground = user32.GetForegroundWindow()
+    current = kernel32.GetCurrentThreadId()
+    other = user32.GetWindowThreadProcessId(wintypes.HWND(foreground), None) if foreground else 0
+    attached = bool(other and other != current and user32.AttachThreadInput(current, other, True))
+    try:
+        user32.BringWindowToTop(target)
+        user32.SetForegroundWindow(target)
+    finally:
+        if attached:
+            user32.AttachThreadInput(current, other, False)
+    if user32.GetForegroundWindow() != hwnd:
+        # Fallback: a synthetic Alt tap counts as the latest input, which unlocks SetForegroundWindow.
+        user32.keybd_event(0x12, 0, 0, 0)
+        user32.keybd_event(0x12, 0, 2, 0)
+        user32.SetForegroundWindow(target)
+
+
+def bring_app_forward(slug):
+    """In the background, waits for the app's main window and brings it to the front.
+    Already running: done within a second. Starting up: keeps up with the splash and
+    main window for a few seconds, but never refocuses a window it already raised."""
+    if os.name != "nt":
+        return
+    exes, title = DESKTOP_APPS[slug][4], DESKTOP_APPS[slug][5]
+
+    def work():
+        from ctypes import wintypes
+        user32 = ctypes.windll.user32
+        user32.GetForegroundWindow.restype = wintypes.HWND
+        running = find_app_window(exes, title) is not None
+        deadline = time.time() + (3 if running else 15)
+        raised = set()
+        time.sleep(0.3)
+        while time.time() < deadline:
+            try:
+                hwnd = find_app_window(exes, title)
+                if hwnd and hwnd not in raised:
+                    raised.add(hwnd)
+                    bring_to_front(hwnd)
+                    if running:
+                        return
+            except OSError:
+                pass
+            time.sleep(0.25)
+
+    threading.Thread(target=work, name="bring-" + slug, daemon=True).start()
+
+
+def open_app(slug):
+    """Opens the desktop app when installed, otherwise its website. Returns "app" or "web"."""
+    scheme, uri, web = DESKTOP_APPS[slug][1:4]
+    if app_installed(scheme):
+        launch_uri(uri)
+        bring_app_forward(slug)
+        return "app"
+    webbrowser.open(web, new=2)
+    return "web"
+
+
+def desktop_apps():
+    return [{"slug": slug, "name": item[0], "installed": app_installed(item[1]), "web": item[3]}
+            for slug, item in DESKTOP_APPS.items()]
+
+
 def local_ip():
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -471,6 +634,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self.json_response(401, {"error": "Clave incorrecta"})
             with ACTION_LOCK:
                 return self.json_response(200, {"states": dict(BUTTON_STATES), "version": STATE_VERSION[0], "epoch": STATE_EPOCH})
+        if path == "/api/desktop-apps":
+            if not self.authorized() or self.client_address[0] not in ("127.0.0.1", "::1"):
+                return self.json_response(403, {"error": "Disponible solo en el editor de esta PC"})
+            return self.json_response(200, {"apps": desktop_apps()})
         if path == "/api/assets":
             if not self.authorized() or self.client_address[0] not in ("127.0.0.1", "::1"):
                 return self.json_response(403, {"error": "Disponible solo en el editor de esta PC"})
@@ -593,17 +760,20 @@ class Handler(BaseHTTPRequestHandler):
                 button = next((b for p in cfg["pages"] for b in p["buttons"] if b["id"] == data.get("id")), None)
                 if not button or button["type"] != "button":
                     return self.json_response(404, {"error": "Botón inexistente"})
+                opened = None
                 with ACTION_LOCK:
                     if button["action"] == "hotkey":
                         send_hotkey(button["value"])
                     elif button["action"] == "url":
                         webbrowser.open(button["value"], new=2)
+                    elif button["action"] == "app":
+                        opened = open_app(button["value"])
                     if button["feedback"]["mode"] == "toggle":
                         BUTTON_STATES[button["id"]] = not BUTTON_STATES.get(button["id"], False)
                         STATE_VERSION[0] += 1
                     states = dict(BUTTON_STATES)
                     version = STATE_VERSION[0]
-                return self.json_response(200, {"ok": True, "states": states, "version": version, "epoch": STATE_EPOCH})
+                return self.json_response(200, {"ok": True, "states": states, "version": version, "epoch": STATE_EPOCH, "opened": opened})
             return self.json_response(404, {"error": "No encontrado"})
         except (ValueError, KeyError, json.JSONDecodeError) as exc:
             return self.json_response(400, {"error": str(exc)})

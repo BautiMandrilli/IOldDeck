@@ -84,6 +84,7 @@
       if (!err && data.states) applyStates(data);
       Motion.flash(button, err ? "did-fail" : "did-fire", 600);
       if (err) showMessage(err, "error");
+      else if (data.opened === "web") showMessage("La app no está instalada en la PC: se abrió su página web", "info");
     });
   }
   function applyStates(response) {

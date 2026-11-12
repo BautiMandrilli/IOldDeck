@@ -152,7 +152,6 @@
       if (text) node.textContent = text;
       (parent || el).appendChild(node); return node;
     }
-    part("div", "spotify-brand", b.label || "Spotify");
     var row = part("div", "spotify-main");
     var cover = part("div", "spotify-cover", "", row); cover.appendChild(symbol("music", 46));
     var img = part("img", "spotify-art", "", cover); img.alt = ""; img.style.display = "none";

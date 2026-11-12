@@ -22,7 +22,7 @@ try {
   await cp(path.join(root, 'spotify_bridge.py'), path.join(temporary, 'spotify_bridge.py'));
   await cp(path.join(root, 'public'), path.join(temporary, 'public'), { recursive: true });
   python = spawn(process.env.PYTHON || 'python', ['-u', '-c',
-    'import importlib.util,sys; sys.path.insert(0,sys.argv[2]); from test_spotify import Backend; s=importlib.util.spec_from_file_location("qa",sys.argv[1]); p=importlib.util.module_from_spec(s); s.loader.exec_module(p); p.send_hotkey=lambda value:None; p.webbrowser.open=lambda *a,**k:True; b=Backend(); p.SPOTIFY=p.SpotifyService(lambda:b); h=p.ThreadingHTTPServer(("127.0.0.1",0),p.Handler); print("PORT="+str(h.server_address[1]),flush=True); h.serve_forever()',
+    'import importlib.util,sys; sys.path.insert(0,sys.argv[2]); from test_spotify import Backend; s=importlib.util.spec_from_file_location("qa",sys.argv[1]); p=importlib.util.module_from_spec(s); s.loader.exec_module(p); p.send_hotkey=lambda value:None; p.webbrowser.open=lambda *a,**k:True; p.launch_uri=lambda uri:None; p.bring_app_forward=lambda slug:None; p.app_installed=lambda scheme:scheme=="discord"; b=Backend(); p.SPOTIFY=p.SpotifyService(lambda:b); h=p.ThreadingHTTPServer(("127.0.0.1",0),p.Handler); print("PORT="+str(h.server_address[1]),flush=True); h.serve_forever()',
     path.join(temporary, 'server.py'), path.join(root, 'tests')], { windowsHide: true });
   let output = '', errors = '';
   python.stdout.on('data', chunk => { output += chunk; });
@@ -110,6 +110,15 @@ try {
   await mode('free');
   assert.equal(await evaluate('document.querySelector(".designer-button[data-id=deafen]").style.left'), '342px');
   assert.equal(await evaluate('document.querySelector(".designer-button[data-id=deafen]").style.width'), '300px');
+  // Free layout: the top-left corner resizes while the bottom-right corner stays put (Alt = no magnet).
+  const edges = 'var s=document.querySelector(".designer-button[data-id=deafen]").style;[parseFloat(s.left)+parseFloat(s.width),parseFloat(s.top)+parseFloat(s.height)]';
+  const fixedCorner = await evaluate(edges);
+  const tl = await evaluate('(function(){var r=document.querySelector(".designer-button[data-id=deafen] .resize-handle[data-handle=tl]").getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2}})()');
+  await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: tl.x, y: tl.y, button: 'left', clickCount: 1, modifiers: 1 });
+  await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: tl.x + 40, y: tl.y + 20, button: 'left', buttons: 1, modifiers: 1 });
+  await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: tl.x + 40, y: tl.y + 20, button: 'left', clickCount: 1, modifiers: 1 });
+  assert.ok(await evaluate('parseFloat(document.querySelector(".designer-button[data-id=deafen]").style.left) > 342'));
+  assert.deepEqual(await evaluate(edges), fixedCorner);
   await mode('grid');
   await delay(600); // let the layout glide settle before measuring tile centers
   assert.ok(await evaluate('parseFloat(document.querySelector(".designer-button[data-id=deafen]").style.width) > 300'));
@@ -122,13 +131,21 @@ try {
   assert.equal(await evaluate('document.querySelector(".designer-button").getAttribute("data-id")'), 'google');
   // Dragging the grid corner handle one box to the right makes the tile 2 boxes wide.
   await delay(500);
-  const grip = await evaluate('(function(){var h=document.querySelector(".designer-button[data-id=google] .resize-handle[data-handle=span]");var r=h.getBoundingClientRect();var s=document.getElementById("preview-shell").clientWidth/1024;return {x:r.left+r.width/2,y:r.top+r.height/2,step:(1024-48-80)/6*s+16*s}})()');
+  const grip = await evaluate('(function(){var h=document.querySelector(".designer-button[data-id=google] .resize-handle[data-handle=span-br]");var r=h.getBoundingClientRect();var s=document.getElementById("preview-shell").clientWidth/1024;return {x:r.left+r.width/2,y:r.top+r.height/2,step:(1024-48-80)/6*s+16*s}})()');
   await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: grip.x, y: grip.y, button: 'left', clickCount: 1 });
   await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: grip.x + grip.step, y: grip.y + 4, button: 'left', buttons: 1 });
   assert.equal(await evaluate('document.querySelector(".span-badge").textContent'), '2 × 1');
   await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: grip.x + grip.step, y: grip.y + 4, button: 'left', clickCount: 1 });
   assert.equal(await evaluate('document.getElementById("grid-cols").value'), '2');
   assert.equal(await evaluate('!!document.querySelector(".span-badge")'), false);
+  // Grid top-left corner: dragging it outward (left) adds a box too.
+  await delay(500);
+  const gripTL = await evaluate('(function(){var r=document.querySelector(".designer-button[data-id=google] .resize-handle[data-handle=span-tl]").getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2}})()');
+  await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: gripTL.x, y: gripTL.y, button: 'left', clickCount: 1 });
+  await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: gripTL.x - grip.step, y: gripTL.y - 4, button: 'left', buttons: 1 });
+  assert.equal(await evaluate('document.querySelector(".span-badge").textContent'), '3 × 1');
+  await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: gripTL.x - grip.step, y: gripTL.y - 4, button: 'left', clickCount: 1 });
+  assert.equal(await evaluate('document.getElementById("grid-cols").value'), '3');
   await evaluate('document.getElementById("save").click()');
   await until(() => evaluate('document.getElementById("editor-message").textContent.indexOf("Cambios guardados")===0'), 'grid save');
   const artifactDir = path.join(root, '.cache'); await mkdir(artifactDir, { recursive: true });
@@ -220,7 +237,10 @@ try {
   await delay(2200);
   assert.equal(await evaluate('window.spotifyNode===document.querySelector(".spotify-card")'), true);
   await evaluate('document.querySelector(".spotify-playpause").click()');
-  await until(() => evaluate('document.querySelector(".spotify-status").textContent==="En pausa"'), 'Spotify pause');
+  await until(() => evaluate('document.querySelector(".spotify-playpause").getAttribute("aria-label")==="Reproducir"'), 'Spotify pause');
+  // Play/pause state is shown by the button only: no brand label and no status line while healthy.
+  assert.equal(await evaluate('!!document.querySelector(".spotify-brand")'), false);
+  assert.equal(await evaluate('document.querySelector(".spotify-status").textContent'), '');
   await until(() => evaluate('!document.querySelector(".spotify-next").disabled'), 'Spotify command done');
   await evaluate('document.querySelector(".spotify-next").click()');
   await until(() => evaluate('document.querySelector(".spotify-title").textContent==="Otra canción"'), 'Spotify next');
@@ -249,6 +269,12 @@ try {
   assert.equal(await evaluate('document.querySelectorAll("#button-controls .group.is-collapsed").length'), 0);
   await evaluate('document.querySelector(".group-toggle[data-section=avanzado]").click()');
   await screenshot('apps-editor.png');
+  // Discord is "installed" in this fixture: picking it makes the button open the desktop app.
+  await evaluate('document.getElementById("add-button").click()');
+  await evaluate('var s=document.querySelector(".app-search");s.value="disc";s.dispatchEvent(new Event("input",{bubbles:true}))');
+  await evaluate('document.querySelector(".app-option[data-app=discord]").click()');
+  assert.equal(await evaluate('document.querySelector(".segmented[aria-label=\'Al tocar\'] .selected").getAttribute("data-value")'), 'app');
+  assert.ok(await evaluate('Array.prototype.some.call(document.querySelectorAll("#button-controls select option"),function(o){return o.selected && o.textContent==="Discord · instalada"})'));
   await evaluate('document.getElementById("save").click()');
   await until(() => evaluate('document.getElementById("editor-message").textContent.indexOf("Cambios guardados")===0'), 'page save');
   await cdp('Emulation.setDeviceMetricsOverride', { width: 1024, height: 768, deviceScaleFactor: 1, mobile: false });
@@ -261,6 +287,10 @@ try {
   const savedApp = (await (await fetch(base + '/api/config', { headers: { 'X-Panel-Token': token } })).json()).pages[1].buttons[0];
   assert.equal(savedApp.builtinIcon, 'app:youtube');
   assert.equal(savedApp.value, 'https://www.youtube.com/');
+  const savedDiscord = (await (await fetch(base + '/api/config', { headers: { 'X-Panel-Token': token } })).json()).pages[1].buttons[1];
+  assert.deepEqual([savedDiscord.action, savedDiscord.value], ['app', 'discord']);
+  await evaluate('document.querySelector("#pages button[data-id=' + savedDiscord.id + ']").click()');
+  await until(() => evaluate('document.querySelector("#pages button[data-id=' + savedDiscord.id + ']").className.indexOf("did-fire")>=0'), 'desktop app action');
   await delay(500);
   await screenshot('tabs-ipad.png');
   // A short rightward flick returns to the first page; a tiny drag springs back.
