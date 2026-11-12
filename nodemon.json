@@ -1,0 +1,8 @@
+{
+  "watch": ["server.py", "spotify_bridge.py", "public", "nodemon.json"],
+  "ext": "py,js,css,html,json,svg,png,jpg,jpeg,gif",
+  "ignore": ["data/**", "tests/**", ".cache/**", "node_modules/**", "**/__pycache__/**"],
+  "exec": "python -u server.py",
+  "delay": "500ms",
+  "env": { "PANEL_DEV": "1" }
+}

@@ -2,6 +2,9 @@
 import ctypes
 import base64
 import json
+import io
+import zipfile
+import zlib
 import os
 import re
 import secrets
@@ -11,6 +14,7 @@ import time
 import urllib.parse
 import webbrowser
 import xml.etree.ElementTree as ET
+from spotify_bridge import SpotifyService
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -22,6 +26,9 @@ CONFIG_FILE = DATA / "config.json"
 ASSET_DIR = DATA / "assets"
 ASSET_INDEX = ASSET_DIR / "index.json"
 PORT = 8765
+DEV_RELOAD = os.environ.get("PANEL_DEV") == "1"
+DEV_VERSION = secrets.token_hex(8)
+SPOTIFY = SpotifyService()
 
 if not TOKEN_FILE.exists():
     TOKEN_FILE.write_text(secrets.token_hex(32), encoding="ascii")
@@ -30,7 +37,7 @@ TOKEN = TOKEN_FILE.read_text(encoding="ascii").strip()
 DEFAULT = {
     "title": "Mi panel",
     "pages": [
-        {"id": "inicio", "title": "Inicio", "height": 620, "backgroundColor": "#111827", "backgroundImage": "", "backgroundAnimation": "none", "buttons": [
+        {"id": "inicio", "title": "Inicio", "layout": "grid", "height": 620, "backgroundColor": "#111827", "backgroundImage": "", "backgroundAnimation": "none", "buttons": [
             {"id": "mute", "label": "Mutear Discord", "x": 24, "y": 24, "w": 300, "h": 125, "backgroundColor": "#6d28d9", "textColor": "#ffffff", "radius": 18, "animation": "none", "icon": "", "image": "", "action": "hotkey", "value": "ctrl+shift+m", "feedback": {"mode": "toggle", "activeLabel": "🔇 Discord muteado", "activeColor": "#b91c1c", "activeIcon": ""}},
             {"id": "deafen", "label": "Ensordecer Discord", "x": 342, "y": 24, "w": 300, "h": 125, "backgroundColor": "#1d4ed8", "textColor": "#ffffff", "radius": 18, "animation": "none", "icon": "", "image": "", "action": "hotkey", "value": "ctrl+shift+d", "feedback": {"mode": "toggle", "activeLabel": "🔇 Discord ensordecido", "activeColor": "#b91c1c", "activeIcon": ""}},
             {"id": "google", "label": "Abrir Google", "x": 24, "y": 167, "w": 618, "h": 125, "backgroundColor": "#15803d", "textColor": "#ffffff", "radius": 18, "animation": "none", "icon": "", "image": "", "action": "url", "value": "https://www.google.com/"}
@@ -41,7 +48,7 @@ DEFAULT = {
 if not CONFIG_FILE.exists():
     CONFIG_FILE.write_text(json.dumps(DEFAULT, indent=2, ensure_ascii=False), encoding="utf-8")
 
-LOCK = threading.Lock()
+LOCK = threading.RLock()
 ACTION_LOCK = threading.Lock()
 BUTTON_STATES = {}
 STATE_VERSION = [0]
@@ -51,6 +58,7 @@ PAIR_CODE = "%06d" % secrets.randbelow(1000000)
 PAIR_ATTEMPTS = {}
 PALETTE = {"purple": "#6d28d9", "blue": "#1d4ed8", "green": "#15803d", "orange": "#c2410c", "red": "#b91c1c", "gray": "#4b5563"}
 ASSET_PATH = re.compile(r"^/assets/[a-f0-9]{32}\.(?:png|jpg|svg|gif)$")
+BUILTIN_ICONS = {"", "grid", "mic", "headphones", "play", "pause", "music", "volume", "home", "globe", "power", "star", "monitor", "keyboard", "camera", "settings", "bell"}
 SVG_TAGS = {"svg", "g", "path", "rect", "circle", "ellipse", "line", "polyline", "polygon", "defs", "linearGradient", "radialGradient", "stop", "clipPath"}
 SVG_ATTRS = {"xmlns", "viewBox", "width", "height", "d", "fill", "stroke", "stroke-width", "stroke-linecap", "stroke-linejoin", "fill-rule", "clip-rule", "opacity", "fill-opacity", "stroke-opacity", "transform", "x", "y", "x1", "y1", "x2", "y2", "cx", "cy", "r", "rx", "ry", "points", "id", "offset", "stop-color", "stop-opacity", "clip-path", "gradientUnits", "gradientTransform"}
 MODIFIERS = {"ctrl": 0x11, "shift": 0x10, "alt": 0x12, "win": 0x5B}
@@ -116,27 +124,43 @@ def validate(raw):
     if not isinstance(raw, dict) or not isinstance(raw.get("pages"), list):
         raise ValueError("Configuración inválida")
     title = str(raw.get("title", "Mi panel"))[:60].strip() or "Mi panel"
+    if raw.get("version", 1) not in (1, 2, 3):
+        raise ValueError("Versión de configuración no compatible")
+    if len(raw["pages"]) > 12:
+        raise ValueError("Máximo 12 páginas")
     pages = []
     ids = set()
     for page in raw["pages"][:12]:
         if not isinstance(page, dict):
-            continue
+            raise ValueError("Página inválida")
         pid = str(page.get("id", ""))[:40]
         if not re.fullmatch(r"[a-zA-Z0-9_-]+", pid) or pid in ids:
             raise ValueError("ID de página inválido o repetido")
         ids.add(pid)
         height = integer(page.get("height"), 400, 1400, 620)
         buttons = []
+        if not isinstance(page.get("buttons", []), list) or len(page.get("buttons", [])) > 80:
+            raise ValueError("Máximo 80 elementos por página")
         for position, button in enumerate(page.get("buttons", [])[:80]):
             if not isinstance(button, dict):
-                continue
+                raise ValueError("Botón inválido")
             bid = str(button.get("id", ""))[:40]
             if not re.fullmatch(r"[a-zA-Z0-9_-]+", bid) or bid in ids:
                 raise ValueError("ID de botón inválido o repetido")
             ids.add(bid)
-            action = str(button.get("action", ""))
+            kind = button.get("type", "button")
+            if kind not in ("button", "folder", "spotify"):
+                raise ValueError("Tipo de elemento desconocido")
+            parent = str(button.get("folderId", ""))
+            display_mode = button.get("displayMode", "both")
+            builtin_icon = button.get("builtinIcon", "")
+            if display_mode not in ("label", "icon", "both") or not isinstance(builtin_icon, str) or builtin_icon not in BUILTIN_ICONS:
+                raise ValueError("Presentación o icono inválido")
+            if kind == "folder" and parent:
+                raise ValueError("No se permiten subcarpetas")
+            action = kind if kind in ("folder", "spotify") else str(button.get("action", ""))
             value = str(button.get("value", ""))[:500].strip()
-            if action not in ("hotkey", "url"):
+            if action not in ("hotkey", "url", "folder", "spotify") or (kind == "button" and action in ("folder", "spotify")):
                 raise ValueError("Acción desconocida")
             if action == "url" and (urllib.parse.urlparse(value).scheme not in ("http", "https") or not urllib.parse.urlparse(value).netloc):
                 raise ValueError("La página debe comenzar con http:// o https://")
@@ -151,7 +175,7 @@ def validate(raw):
                 else:
                     feedback = {}
             clean_feedback = {
-                "mode": "toggle" if feedback.get("mode") == "toggle" else "none",
+                "mode": "toggle" if kind == "button" and feedback.get("mode") == "toggle" else "none",
                 "activeLabel": str(feedback.get("activeLabel") or "Activo")[:60],
                 "activeColor": color(feedback.get("activeColor"), "#b91c1c"),
                 "activeIcon": asset_path(feedback.get("activeIcon")),
@@ -159,11 +183,15 @@ def validate(raw):
             legacy_wide = button.get("size") == "wide"
             fallback_x = 24 if legacy_wide else 24 + (position % 3) * 318
             fallback_y = 24 + (position // 2 if legacy_wide else position // 3) * 143
-            w = integer(button.get("w"), 64, 1024, 618 if legacy_wide else 300)
-            h = integer(button.get("h"), 50, height, 125)
+            w = integer(button.get("w"), 320 if kind == "spotify" else 64, 1024, 646 if kind == "spotify" else (618 if legacy_wide else 300))
+            h = integer(button.get("h"), 220 if kind == "spotify" else 50, height, 280 if kind == "spotify" else 125)
             x = min(integer(button.get("x"), 0, 1024, fallback_x), 1024 - w)
             y = min(integer(button.get("y"), 0, height, fallback_y), height - h)
             buttons.append({"id": bid, "label": str(button.get("label", "Botón"))[:60],
+                            "displayMode": display_mode, "builtinIcon": builtin_icon,
+                            "type": kind, "folderId": parent,
+                            "cols": integer(button.get("cols"), 3 if kind == "spotify" else 1, 6, 4 if kind == "spotify" else 1),
+                            "rows": integer(button.get("rows"), 2 if kind == "spotify" else 1, 4, 2 if kind == "spotify" else 1),
                             "x": x, "y": y, "w": w, "h": h,
                             "backgroundColor": color(button.get("backgroundColor"), PALETTE.get(str(button.get("color")), "#1d4ed8")),
                             "textColor": color(button.get("textColor"), "#ffffff"),
@@ -176,15 +204,145 @@ def validate(raw):
                             "textAlign": button.get("textAlign") if button.get("textAlign") in ("left", "center", "right") else "center",
                             "animation": button.get("animation") if button.get("animation") in ("none", "pulse", "float", "glow") else "none",
                             "icon": asset_path(button.get("icon")), "image": asset_path(button.get("image")),
-                            "action": action, "value": value, "feedback": clean_feedback})
+                            "action": action, "value": "" if kind in ("folder", "spotify") else value, "feedback": clean_feedback})
+        folders = {b["id"] for b in buttons if b["type"] == "folder"}
+        if any(b["folderId"] and b["folderId"] not in folders for b in buttons):
+            raise ValueError("La carpeta debe existir en la misma página")
         pages.append({"id": pid, "title": str(page.get("title", "Página"))[:40], "height": height,
+                      "layout": "grid" if page.get("layout") == "grid" else "free",
                       "backgroundColor": color(page.get("backgroundColor"), "#111827"),
                       "backgroundImage": asset_path(page.get("backgroundImage")),
                       "backgroundAnimation": page.get("backgroundAnimation") if page.get("backgroundAnimation") in ("none", "pan", "zoom") else "none",
                       "buttons": buttons})
     if not pages:
         raise ValueError("Debe existir al menos una página")
-    return {"title": title, "pages": pages}
+    return {"version": 3, "title": title, "pages": pages}
+
+
+MAX_CONFIG = 2000000
+MAX_BACKUP = 505000000
+
+
+def image_bytes(raw, mime):
+    if not raw or len(raw) > 2500000:
+        raise ValueError("La imagen debe pesar menos de 2,5 MB")
+    signatures = {"image/png": (b"\x89PNG\r\n\x1a\n",), "image/jpeg": (b"\xff\xd8",),
+                  "image/gif": (b"GIF87a", b"GIF89a")}
+    if mime == "image/svg+xml":
+        return safe_svg(raw)
+    if mime not in signatures or not raw.startswith(signatures[mime]):
+        raise ValueError("Imagen inválida")
+    return raw
+
+
+def referenced_assets(cfg):
+    paths = set()
+    for p in cfg["pages"]:
+        paths.add(p["backgroundImage"])
+        for b in p["buttons"]:
+            paths.update((b["image"], b["icon"], b["feedback"]["activeIcon"]))
+    return paths - {""}
+
+
+def backup_bytes():
+    with LOCK:
+        cfg = validate(config())
+        assets = list_assets()
+        if not referenced_assets(cfg).issubset({a["url"] for a in assets}):
+            raise ValueError("Faltan imágenes de la configuración")
+        output = io.BytesIO()
+        with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("config.json", json.dumps(cfg, ensure_ascii=False))
+            archive.writestr("assets/index.json", json.dumps(assets, ensure_ascii=False))
+            for item in assets:
+                url = asset_path(item["url"])
+                archive.writestr(url.lstrip("/"), (DATA / url.lstrip("/")).read_bytes())
+        return output.getvalue()
+
+
+def read_backup(body):
+    try:
+        with zipfile.ZipFile(io.BytesIO(body)) as archive:
+            entries = archive.infolist()
+            names = [i.filename for i in entries]
+            if len(entries) > 202 or len(names) != len(set(names)) or sum(i.file_size for i in entries) > MAX_BACKUP:
+                raise ValueError("Respaldo demasiado grande o con archivos repetidos")
+            for entry in entries:
+                allowed = entry.filename in ("config.json", "assets/index.json") or ASSET_PATH.fullmatch("/" + entry.filename)
+                limit = MAX_CONFIG if entry.filename.endswith(".json") else 2500000
+                if not allowed or entry.file_size > limit or entry.flag_bits & 1:
+                    raise ValueError("Archivo no permitido en el respaldo")
+            cfg = validate(json.loads(archive.read("config.json")))
+            assets = json.loads(archive.read("assets/index.json"))
+            if not isinstance(assets, list) or len(assets) > 200:
+                raise ValueError("Índice de imágenes inválido")
+            clean_assets, files, urls = [], {}, set()
+            mimes = {"png": "image/png", "jpg": "image/jpeg", "gif": "image/gif", "svg": "image/svg+xml"}
+            for item in assets:
+                url = asset_path(item["url"])
+                if not url or url in urls:
+                    raise ValueError("Imagen repetida o inválida")
+                mime = mimes[url.rsplit(".", 1)[1]]
+                if item.get("mime") != mime:
+                    raise ValueError("Tipo de imagen inválido")
+                files[url] = image_bytes(archive.read(url.lstrip("/")), mime)
+                urls.add(url)
+                clean_assets.append({"url": url, "mime": mime, "name": str(item.get("name", "Imagen"))[:100]})
+            if not referenced_assets(cfg).issubset(urls):
+                raise ValueError("Faltan imágenes referenciadas")
+            if set(names) != {"config.json", "assets/index.json"} | {u.lstrip("/") for u in urls}:
+                raise ValueError("El respaldo contiene archivos fuera del índice")
+            return cfg, clean_assets, files
+    except (zipfile.BadZipFile, zipfile.LargeZipFile, zlib.error, EOFError, KeyError, TypeError, AttributeError, UnicodeError, RuntimeError, NotImplementedError) as exc:
+        raise ValueError("Respaldo ZIP inválido o incompleto") from exc
+
+
+def restore_backup(prepared):
+    cfg, assets, files = prepared
+    # Install images with fresh names first; the active config never sees missing files.
+    with LOCK:
+        previous = backup_bytes()
+        backup = DATA / ("before-restore-" + time.strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(4) + ".zip")
+        backup.write_bytes(previous)
+        old_config = CONFIG_FILE.read_bytes()
+        old_index = ASSET_INDEX.read_bytes() if ASSET_INDEX.exists() else None
+        created = []
+        try:
+            ASSET_DIR.mkdir(exist_ok=True)
+            mapping = {}
+            for url, raw in files.items():
+                name = secrets.token_hex(16) + "." + url.rsplit(".", 1)[1]
+                target = ASSET_DIR / name
+                target.write_bytes(raw)
+                created.append(target)
+                mapping[url] = "/assets/" + name
+            for item in assets:
+                item["url"] = mapping[item["url"]]
+            for p in cfg["pages"]:
+                p["backgroundImage"] = mapping.get(p["backgroundImage"], "")
+                for b in p["buttons"]:
+                    for key in ("image", "icon"):
+                        b[key] = mapping.get(b[key], "")
+                    b["feedback"]["activeIcon"] = mapping.get(b["feedback"]["activeIcon"], "")
+            temp_index = ASSET_INDEX.with_suffix(".tmp")
+            temp_index.write_text(json.dumps(assets, ensure_ascii=False), encoding="utf-8")
+            temp_config = CONFIG_FILE.with_suffix(".tmp")
+            temp_config.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+            temp_index.replace(ASSET_INDEX)
+            temp_config.replace(CONFIG_FILE)
+        except Exception:
+            CONFIG_FILE.write_bytes(old_config)
+            if old_index is None:
+                ASSET_INDEX.unlink(missing_ok=True)
+            else:
+                ASSET_INDEX.write_bytes(old_index)
+            for target in created:
+                target.unlink(missing_ok=True)
+            raise
+    with ACTION_LOCK:
+        BUTTON_STATES.clear()
+        STATE_VERSION[0] += 1
+    return {"config": cfg, "backup": backup.name}
 
 
 def valid_hotkey(value):
@@ -246,6 +404,39 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = urllib.parse.urlsplit(self.path).path
+        if path in ("/api/spotify/state", "/api/spotify/artwork"):
+            if not self.authorized():
+                return self.json_response(401, {"error": "Clave incorrecta"})
+            if path.endswith("/state"):
+                return self.json_response(200, SPOTIFY.snapshot())
+            revision = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get("revision", [""])[0]
+            art = SPOTIFY.artwork(revision)
+            if art is None:
+                return self.json_response(404, {"error": "Carátula no disponible"})
+            body, mime = art
+            self.send_response(200)
+            self.send_header("Content-Type", mime)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if path == "/api/backup":
+            if not self.authorized() or self.client_address[0] not in ("127.0.0.1", "::1"):
+                return self.json_response(403, {"error": "Disponible solo en el editor de esta PC"})
+            try:
+                body = backup_bytes()
+            except (ValueError, OSError) as exc:
+                return self.json_response(400, {"error": str(exc)})
+            self.send_response(200)
+            self.send_header("Content-Type", "application/zip")
+            self.send_header("Content-Disposition", 'attachment; filename="mi-panel.zip"')
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if ASSET_PATH.fullmatch(path):
             filename = path.rsplit("/", 1)[-1]
             file = ASSET_DIR / filename
@@ -269,6 +460,10 @@ class Handler(BaseHTTPRequestHandler):
             if not self.authorized():
                 return self.json_response(401, {"error": "Clave incorrecta"})
             return self.json_response(200, validate(config()))
+        if path == "/api/dev-version":
+            if not self.authorized():
+                return self.json_response(401, {"error": "Clave incorrecta"})
+            return self.json_response(200, {"version": DEV_VERSION if DEV_RELOAD else None})
         if path == "/api/state":
             if not self.authorized():
                 return self.json_response(401, {"error": "Clave incorrecta"})
@@ -280,11 +475,17 @@ class Handler(BaseHTTPRequestHandler):
             return self.json_response(200, {"assets": list_assets()})
         assets = {"/": ("index.html", "text/html"), "/editor": ("editor.html", "text/html"),
                   "/style.css": ("style.css", "text/css"), "/app.js": ("app.js", "text/javascript"),
-                  "/designer.js": ("designer.js", "text/javascript")}
+                  "/designer.js": ("designer.js", "text/javascript"),
+                  "/layout.js": ("layout.js", "text/javascript"),
+                  "/dev-reload.js": ("dev-reload.js", "text/javascript")}
+        assets["/spotify.js"] = ("spotify.js", "text/javascript")
         if path not in assets:
             return self.json_response(404, {"error": "No encontrado"})
         name, mime = assets[path]
         body = (ROOT / "public" / name).read_bytes()
+        if DEV_RELOAD and name.endswith(".html"):
+            script = '<script>window.panelDevVersion=' + json.dumps(DEV_VERSION) + ';</script><script src="/dev-reload.js"></script>'
+            body = body.replace(b"</body>", script.encode("utf-8") + b"</body>")
         self.send_response(200)
         self.send_header("Content-Type", mime + "; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
@@ -298,10 +499,28 @@ class Handler(BaseHTTPRequestHandler):
             return self.json_response(401, {"error": "Clave incorrecta"})
         try:
             size = int(self.headers.get("Content-Length", "0"))
-            limit = 4000000 if path == "/api/assets" else 100000
+            if path == "/api/restore":
+                if self.client_address[0] not in ("127.0.0.1", "::1"):
+                    return self.json_response(403, {"error": "Restaurar solo desde esta computadora"})
+                if size < 1 or size > MAX_BACKUP:
+                    raise ValueError("Respaldo demasiado grande (máximo 505 MB)")
+                prepared = read_backup(self.rfile.read(size))
+                if urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get("preview") == ["1"]:
+                    cfg = prepared[0]
+                    items = [b for p in cfg["pages"] for b in p["buttons"]]
+                    return self.json_response(200, {"title": cfg["title"], "pages": len(cfg["pages"]),
+                        "folders": sum(b["type"] == "folder" for b in items),
+                        "widgets": sum(b["type"] == "spotify" for b in items),
+                        "buttons": sum(b["type"] == "button" for b in items)})
+                return self.json_response(200, restore_backup(prepared))
+            limit = 4000000 if path == "/api/assets" else MAX_CONFIG
             if size < 1 or size > limit:
                 raise ValueError("Tamaño de solicitud inválido")
             data = json.loads(self.rfile.read(size).decode("utf-8"))
+            if path == "/api/spotify/control":
+                if not isinstance(data, dict):
+                    raise ValueError("Control inválido")
+                return self.json_response(200, SPOTIFY.control(data.get("command"), data.get("sessionId")))
             if path == "/api/pair":
                 ip = self.client_address[0]
                 code = str(data.get("code", "")) if isinstance(data, dict) else ""
@@ -367,7 +586,7 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/action":
                 cfg = validate(config())
                 button = next((b for p in cfg["pages"] for b in p["buttons"] if b["id"] == data.get("id")), None)
-                if not button:
+                if not button or button["type"] != "button":
                     return self.json_response(404, {"error": "Botón inexistente"})
                 with ACTION_LOCK:
                     if button["action"] == "hotkey":
@@ -393,9 +612,12 @@ if __name__ == "__main__":
     print("iPad: http://%s:%d" % (local_ip(), PORT))
     print("Código para vincular el iPad: %s" % PAIR_CODE)
     print("Presioná Ctrl+C para detener.")
+    if DEV_RELOAD:
+        print("Desarrollo: recarga automática activada en el panel y el editor.")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         print("Servidor detenido.")
     finally:
+        SPOTIFY.close()
         server.server_close()

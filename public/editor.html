@@ -21,18 +21,26 @@
         <button id="page-down" type="button" class="edit-button small">↓</button>
         <button id="delete-page" type="button" class="edit-button small danger">Eliminar</button>
       </div>
-      <h2 class="side-heading">Fondo y página</h2>
-      <div id="page-controls"></div>
       <h2 class="side-heading">Botones</h2>
       <button id="add-button" type="button" class="edit-button primary full">+ Agregar botón</button>
+      <button id="add-folder" type="button" class="edit-button full">+ Crear carpeta</button>
+      <button id="add-spotify" type="button" class="edit-button full">+ Agregar tarjeta Spotify</button>
       <div id="button-controls" class="button-inspector"><p class="hint">Seleccioná un botón en el lienzo para editarlo.</p></div>
+      <h2 class="side-heading">Fondo y página</h2>
+      <div id="page-controls"></div>
       <p id="editor-message" role="status"></p>
+      <h2 class="side-heading">Llevar a otra PC</h2>
+      <button id="export-backup" type="button" class="edit-button full">Exportar personalización</button>
+      <label class="upload-button">Importar respaldo ZIP<input id="import-backup" type="file" accept=".zip,application/zip"></label>
+      <div id="restore-preview" role="status"></div>
     </aside>
     <section class="designer-preview">
-      <div class="preview-heading"><div><h1>Vista previa del iPad</h1><p>Arrastrá un botón para moverlo. Tirás de una esquina inferior para cambiarle el tamaño.</p></div><span>1024 px de ancho de diseño</span></div>
+      <div class="preview-heading"><div><h1>Tu espacio, a tu manera.</h1><p>Arrastrá para ordenar. En modo libre, usá las esquinas para cambiar el tamaño.</p></div><span>Vista previa del iPad · 1024 px</span></div>
+      <div id="folder-navigation"></div>
       <div id="preview-shell" class="preview-shell"><div id="preview-canvas" class="dashboard-canvas"></div></div>
     </section>
   </main>
+  <script src="/layout.js"></script>
   <script src="/designer.js"></script>
 </body>
 </html>

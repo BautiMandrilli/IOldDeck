@@ -3,4 +3,6 @@ __pycache__/
 *.py[cod]
 .venv/
 *.log
+.cache/
+node_modules/
 public/editor.js

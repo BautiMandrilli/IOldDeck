@@ -8,6 +8,8 @@
   var token = localStorage.getItem("panel_token") || "";
   var pages = [];
   var active = 0;
+  var openFolderId = "";
+  var folderTrigger = null;
   var messageTimer;
   var signature = "";
   var states = {};
@@ -45,6 +47,7 @@
     el.className = ok ? "status online" : "status offline";
   }
   function showPair(show) {
+    if (show) closeFolder();
     document.getElementById("pair").style.display = show ? "block" : "none";
     document.getElementById("pages").style.display = show ? "none" : "block";
     document.getElementById("tabs").style.display = show ? "none" : "flex";
@@ -67,7 +70,7 @@
     if (stateSignature === nextSignature) return;
     states = next;
     stateSignature = nextSignature;
-    if (pages.length) draw();
+    if (pages.length) refreshButtons();
   }
   function refreshStates() {
     if (!token) return;
@@ -75,85 +78,106 @@
       if (!err && data.states) applyStates(data);
     });
   }
+  function refreshButtons() {
+    var page = pages[active];
+    if (!page) return;
+    var nodes = document.querySelectorAll("button[data-id]");
+    for (var i = 0; i < nodes.length; i++) {
+      var id = nodes[i].getAttribute("data-id");
+      for (var j = 0; j < page.buttons.length; j++) if (page.buttons[j].id === id) {
+        var item = page.buttons[j], on = item.feedback.mode === "toggle" && states[id] === true;
+        nodes[i].className = "action-canvas animate-" + item.animation + (on ? " feedback-active" : "");
+        PanelLayout.paint(nodes[i], item, page, on);
+      }
+    }
+  }
+  function renderCanvas(page, parent, folderId) {
+    var shell = document.createElement("div"); shell.className = "canvas-shell";
+    var canvas = document.createElement("div"); canvas.className = "dashboard-canvas";
+    var layout = PanelLayout.layout(page, folderId);
+    if (!folderId) PanelLayout.background(canvas, page);
+    layout.items.forEach(function (item) {
+      var button = document.createElement(item.type === "spotify" ? "div" : "button");
+      if (item.type !== "spotify") button.type = "button";
+      var on = item.feedback.mode === "toggle" && states[item.id] === true;
+      button.className = "action-canvas animate-" + item.animation + (on ? " feedback-active" : "");
+      button.setAttribute("data-id", item.id);
+      if (item.type === "folder") button.setAttribute("aria-haspopup", "dialog");
+      PanelLayout.position(button, layout.boxes[item.id]);
+      PanelLayout.paint(button, item, page, on);
+      if (item.type === "spotify") button.setAttribute("data-live-spotify", "true");
+      button.onclick = function () {
+        if (item.type === "folder") { folderTrigger = button; openFolderId = item.id; drawFolder(); }
+        else if (item.type === "button") run(item.id, button);
+      };
+      canvas.appendChild(button);
+    });
+    if (!layout.items.length) {
+      var empty = document.createElement("p"); empty.className = "canvas-empty";
+      empty.textContent = folderId ? "Esta carpeta está vacía" : "Agregá botones desde el editor de la PC";
+      canvas.appendChild(empty);
+    }
+    shell.appendChild(canvas); parent.appendChild(shell);
+    PanelLayout.fit(shell, canvas, layout.height);
+    if (window.SpotifyCards) SpotifyCards.mount();
+  }
+  function closeFolder() {
+    openFolderId = "";
+    var overlay = document.getElementById("folder-overlay");
+    if (overlay) overlay.parentNode.removeChild(overlay);
+    document.body.className = "";
+    document.getElementById("pages").removeAttribute("aria-hidden");
+    document.getElementById("tabs").removeAttribute("aria-hidden");
+    if (folderTrigger && document.body.contains(folderTrigger)) folderTrigger.focus();
+  }
+  function drawFolder() {
+    var previous = document.getElementById("folder-overlay"), oldScroll = 0;
+    if (previous) {
+      oldScroll = previous.querySelector(".folder-dialog").scrollTop;
+      previous.parentNode.removeChild(previous);
+    }
+    if (!openFolderId) return;
+    var page = pages[active], folder = null;
+    for (var i = 0; i < page.buttons.length; i++) if (page.buttons[i].id === openFolderId && page.buttons[i].type === "folder") folder = page.buttons[i];
+    if (!folder) { closeFolder(); return; }
+    var overlay = document.createElement("div"); overlay.id = "folder-overlay"; overlay.className = "folder-overlay";
+    var dialog = document.createElement("section"); dialog.className = "folder-dialog";
+    dialog.setAttribute("role", "dialog"); dialog.setAttribute("aria-modal", "true"); dialog.setAttribute("aria-labelledby", "folder-title");
+    var heading = document.createElement("div"); heading.className = "folder-heading";
+    var title = document.createElement("h2"); title.id = "folder-title"; title.textContent = folder.label;
+    var close = document.createElement("button"); close.type = "button"; close.className = "edit-button"; close.textContent = "Cerrar"; close.onclick = closeFolder;
+    heading.appendChild(title); heading.appendChild(close); dialog.appendChild(heading);
+    overlay.appendChild(dialog); document.body.appendChild(overlay);
+    renderCanvas(page, dialog, openFolderId);
+    dialog.scrollTop = oldScroll;
+    overlay.onclick = function (e) { if (e.target === overlay) closeFolder(); };
+    dialog.onkeydown = function (e) {
+      if (e.keyCode !== 9) return;
+      var controls = dialog.querySelectorAll("button"), first = controls[0], last = controls[controls.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    };
+    document.body.className = "folder-is-open";
+    document.getElementById("pages").setAttribute("aria-hidden", "true");
+    document.getElementById("tabs").setAttribute("aria-hidden", "true");
+    close.focus();
+  }
   function draw() {
-    var panel = document.getElementById("pages");
-    var tabs = document.getElementById("tabs");
+    var panel = document.getElementById("pages"), tabs = document.getElementById("tabs");
     clear(panel); clear(tabs);
     if (!pages.length) return;
     var page = pages[active];
-    var heading = document.createElement("h2");
-    heading.textContent = page.title;
-    panel.appendChild(heading);
-    var shell = document.createElement("div");
-    shell.className = "canvas-shell";
-    var canvas = document.createElement("div");
-    canvas.className = "dashboard-canvas";
-    canvas.style.height = page.height + "px";
-    canvas.style.backgroundColor = page.backgroundColor;
-    var background = document.createElement("div");
-    background.className = "canvas-background bg-" + page.backgroundAnimation;
-    if (page.backgroundImage) background.style.backgroundImage = "url('" + page.backgroundImage + "')";
-    canvas.appendChild(background);
-    for (var i = 0; i < page.buttons.length; i++) {
-      var item = page.buttons[i];
-      var feedback = item.feedback || { mode: "none" };
-      var activeState = feedback.mode === "toggle" && states[item.id] === true;
-      var button = document.createElement("button");
-      button.type = "button";
-      button.className = "action-canvas animate-" + item.animation + (activeState ? " feedback-active" : "");
-      button.style.left = item.x + "px";
-      button.style.top = item.y + "px";
-      button.style.width = item.w + "px";
-      button.style.height = item.h + "px";
-      button.style.backgroundColor = activeState ? feedback.activeColor : item.backgroundColor;
-      button.style.color = item.textColor;
-      button.style.borderColor = item.borderColor;
-      button.style.borderWidth = item.borderWidth + "px";
-      button.style.borderRadius = item.radius + "px";
-      button.style.fontSize = item.fontSize + "px";
-      button.style.opacity = item.opacity / 100;
-      if (item.image) button.style.backgroundImage = "linear-gradient(rgba(0,0,0,.2),rgba(0,0,0,.2)),url('" + item.image + "')";
-      var content = document.createElement("span");
-      content.className = "button-content";
-      content.style.textAlign = item.textAlign;
-      var visibleIcon = activeState && feedback.activeIcon ? feedback.activeIcon : item.icon;
-      if (visibleIcon) {
-        var icon = document.createElement("img");
-        icon.src = visibleIcon;
-        icon.alt = "";
-        icon.style.width = item.iconSize + "px";
-        icon.style.height = item.iconSize + "px";
-        content.appendChild(icon);
-      }
-      var label = document.createElement("span");
-      label.textContent = activeState ? feedback.activeLabel : item.label;
-      content.appendChild(label);
-      button.appendChild(content);
-      if (feedback.mode === "toggle") {
-        var badge = document.createElement("span");
-        badge.className = "feedback-badge";
-        badge.textContent = "ESTIMADO";
-        button.appendChild(badge);
-        button.title = "Estado estimado según los toques hechos desde este panel";
-      }
-      button.onclick = (function (id, el) { return function () { run(id, el); }; })(item.id, button);
-      canvas.appendChild(button);
-    }
-    shell.appendChild(canvas);
-    panel.appendChild(shell);
-    var scale = shell.clientWidth / 1024;
-    canvas.style.webkitTransform = "scale(" + scale + ")";
-    canvas.style.transform = "scale(" + scale + ")";
-    shell.style.height = Math.ceil(page.height * scale) + "px";
+    var heading = document.createElement("h2"); heading.textContent = page.title;
+    panel.appendChild(heading); renderCanvas(page, panel, "");
     for (var j = 0; j < pages.length; j++) {
-      var tab = document.createElement("button");
-      tab.type = "button";
-      tab.textContent = pages[j].title;
+      var tab = document.createElement("button"); tab.type = "button"; tab.textContent = pages[j].title;
       tab.className = "tab" + (j === active ? " selected" : "");
-      tab.onclick = (function (index) { return function () { active = index; draw(); }; })(j);
+      tab.onclick = (function (index) { return function () { closeFolder(); active = index; draw(); }; })(j);
       tabs.appendChild(tab);
     }
+    drawFolder();
   }
+  document.addEventListener("keydown", function (e) { if (e.keyCode === 27 && openFolderId) closeFolder(); });
   function load() {
     if (!token) {
       setStatus(false);

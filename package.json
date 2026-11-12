@@ -1,0 +1,15 @@
+{
+  "name": "panel-propio",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "nodemon",
+    "start": "python server.py",
+    "setup:spotify": "python -m pip install -r requirements-spotify.txt && python setup_spotify.py",
+    "test:dev": "node tests/test_dev.js",
+    "test": "python -m unittest discover -s tests -v && node tests/test_layout.js"
+  },
+  "devDependencies": {
+    "nodemon": "3.1.11"
+  }
+}
