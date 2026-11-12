@@ -410,10 +410,10 @@
   function updateDock() {
     var b = model && selected(), grid = !model || isGrid();
     ["dock-duplicate", "dock-before", "dock-after", "dock-delete"].forEach(function (id) { $(id).disabled = !b; });
-    $("dock-before").lastChild.textContent = grid ? "Antes" : "Al frente";
-    $("dock-before").title = grid ? "Mover antes" : "Traer al frente";
-    $("dock-after").lastChild.textContent = grid ? "Después" : "Atrás";
-    $("dock-after").title = grid ? "Mover después" : "Enviar atrás";
+    $("dock-before").lastChild.textContent = grid ? "Mover a la izquierda" : "Al frente";
+    $("dock-before").title = grid ? "Mover un lugar a la izquierda" : "Traer al frente";
+    $("dock-after").lastChild.textContent = grid ? "Mover a la derecha" : "Atrás";
+    $("dock-after").title = grid ? "Mover un lugar a la derecha" : "Enviar atrás";
   }
   function drawButtonControls() {
     updateDock();
@@ -608,7 +608,7 @@
     layout.items.forEach(function (item) { var n = nodeFor(item.id); if (n) PanelLayout.position(n, layout.boxes[item.id]); });
     scale = PanelLayout.fit($("preview-shell"), canvas, layout.height);
     var stage = document.querySelector(".stage");
-    stage.classList.toggle("is-compact", stage.clientWidth < 900);
+    stage.classList.toggle("is-compact", stage.clientWidth < 1040);
     stage.classList.toggle("is-narrow", stage.clientWidth < 720);
     drawGuides(canvas, layout);
   }
