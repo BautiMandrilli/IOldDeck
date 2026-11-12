@@ -61,7 +61,8 @@ ASSET_PATH = re.compile(r"^/assets/[a-f0-9]{32}\.(?:png|jpg|svg|gif)$")
 BUILTIN_ICONS = {"", "grid", "mic", "headphones", "play", "pause", "music", "volume", "home", "globe", "power", "star", "monitor", "keyboard", "camera", "settings", "bell"}
 SVG_TAGS = {"svg", "g", "path", "rect", "circle", "ellipse", "line", "polyline", "polygon", "defs", "linearGradient", "radialGradient", "stop", "clipPath"}
 SVG_ATTRS = {"xmlns", "viewBox", "width", "height", "d", "fill", "stroke", "stroke-width", "stroke-linecap", "stroke-linejoin", "fill-rule", "clip-rule", "opacity", "fill-opacity", "stroke-opacity", "transform", "x", "y", "x1", "y1", "x2", "y2", "cx", "cy", "r", "rx", "ry", "points", "id", "offset", "stop-color", "stop-opacity", "clip-path", "gradientUnits", "gradientTransform"}
-MODIFIERS = {"ctrl": 0x11, "shift": 0x10, "alt": 0x12, "win": 0x5B}
+# Left-hand modifier keys, as a physical keyboard reports them.
+MODIFIERS = {"ctrl": 0xA2, "shift": 0xA0, "alt": 0xA4, "win": 0x5B}
 SPECIAL = {"enter": 0x0D, "tab": 0x09, "esc": 0x1B, "space": 0x20, "backspace": 0x08,
            "left": 0x25, "up": 0x26, "right": 0x27, "down": 0x28, "delete": 0x2E}
 
@@ -366,16 +367,32 @@ def key_code(part):
     return ord(part.upper())
 
 
+def scan_code(vk):
+    return ctypes.windll.user32.MapVirtualKeyW(vk, 4)  # MAPVK_VK_TO_VSC_EX: 0xE0xx for extended keys
+
+
+def hotkey_events(value, scan=scan_code):
+    """Key presses in order, then releases in reverse, as (virtual key, scan code, flags).
+    Apps with global shortcuts (Discord, OBS, games) match on the hardware scan code, so
+    events without it (scan 0) are ignored even though Windows knows the virtual key."""
+    downs = []
+    for part in value.lower().split("+"):
+        vk = key_code(part)
+        code = scan(vk)
+        downs.append((vk, code & 0xFF, 1 if code & 0xFF00 in (0xE000, 0xE100) else 0))  # KEYEVENTF_EXTENDEDKEY
+    return downs + [(vk, code, flags | 2) for vk, code, flags in reversed(downs)]  # KEYEVENTF_KEYUP
+
+
 def send_hotkey(value):
     if os.name != "nt":
         raise RuntimeError("Los atajos requieren Windows")
-    codes = [key_code(part) for part in value.lower().split("+")]
     user32 = ctypes.windll.user32
-    for code in codes:
-        user32.keybd_event(code, 0, 0, 0)
-    time.sleep(0.035)
-    for code in reversed(codes):
-        user32.keybd_event(code, 0, 2, 0)
+    events = hotkey_events(value)
+    last_down = len(events) // 2 - 1
+    for index, (vk, code, flags) in enumerate(events):
+        user32.keybd_event(vk, code, flags, 0)
+        # Short gaps between keys and a ~60 ms hold, like a person pressing the combination.
+        time.sleep(0.06 if index == last_down else 0.012)
 
 
 # Desktop apps that register a link type in Windows: opening that link launches the

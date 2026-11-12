@@ -1,6 +1,7 @@
 """Regression checks that never read the user's data/ directory."""
 import importlib.util
 import io
+import os
 import json
 import shutil
 import tempfile
@@ -111,6 +112,17 @@ class TestPanelServer(unittest.TestCase):
             result = self.request("/api/action", b'{"id":"google"}')
             self.assertEqual(result.code, 200)
             browser.assert_called_once_with("https://www.google.com/", new=2)
+
+    def test_hotkey_events_carry_scan_codes(self):
+        scans = {0xA2: 0x1D, 0xA0: 0x2A, 0x31: 0x02, 0x25: 0xE04B}
+        events = self.panel.hotkey_events("ctrl+shift+1", scans.get)
+        self.assertEqual(events, [(0xA2, 0x1D, 0), (0xA0, 0x2A, 0), (0x31, 0x02, 0),
+                                  (0x31, 0x02, 2), (0xA0, 0x2A, 2), (0xA2, 0x1D, 2)])
+        self.assertEqual(self.panel.hotkey_events("ctrl+left", scans.get)[1], (0x25, 0x4B, 1))
+        if os.name == "nt":  # Modifier scan codes are the same on every keyboard layout.
+            real = self.panel.hotkey_events("ctrl+shift+1")
+            self.assertEqual([(vk, code) for vk, code, _ in real[:2]], [(0xA2, 0x1D), (0xA0, 0x2A)])
+            self.assertTrue(all(code for _vk, code, _flags in real))
 
     def test_desktop_app_opens_installed_app_or_website(self):
         cfg = self.folder_config()
