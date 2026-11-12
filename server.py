@@ -154,7 +154,9 @@ def validate(raw):
             parent = str(button.get("folderId", ""))
             display_mode = button.get("displayMode", "both")
             builtin_icon = button.get("builtinIcon", "")
-            if display_mode not in ("label", "icon", "both") or not isinstance(builtin_icon, str) or builtin_icon not in BUILTIN_ICONS:
+            # "app:<slug>" refers to the app logo library in public/app-icons.js.
+            if display_mode not in ("label", "icon", "both") or not isinstance(builtin_icon, str) or (
+                    builtin_icon not in BUILTIN_ICONS and not re.fullmatch(r"app:[a-z0-9]{1,40}", builtin_icon)):
                 raise ValueError("Presentación o icono inválido")
             if kind == "folder" and parent:
                 raise ValueError("No se permiten subcarpetas")
@@ -479,6 +481,9 @@ class Handler(BaseHTTPRequestHandler):
                   "/layout.js": ("layout.js", "text/javascript"),
                   "/dev-reload.js": ("dev-reload.js", "text/javascript")}
         assets["/spotify.js"] = ("spotify.js", "text/javascript")
+        assets["/motion.js"] = ("motion.js", "text/javascript")
+        assets["/app-icons.js"] = ("app-icons.js", "text/javascript")
+        assets["/editor.css"] = ("editor.css", "text/css")
         if path not in assets:
             return self.json_response(404, {"error": "No encontrado"})
         name, mime = assets[path]

@@ -130,6 +130,16 @@ class TestPanelServer(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.panel.validate(cfg)
 
+    def test_app_library_icons_validate(self):
+        cfg = self.folder_config()
+        button = cfg["pages"][0]["buttons"][0]
+        button.update(displayMode="both", builtinIcon="app:youtube")
+        self.assertEqual(self.panel.validate(cfg)["pages"][0]["buttons"][0]["builtinIcon"], "app:youtube")
+        for bad in ("app:", "app:You Tube", "app:../x", "app:" + "a" * 41):
+            button["builtinIcon"] = bad
+            with self.assertRaises(ValueError):
+                self.panel.validate(cfg)
+
     def test_backup_round_trip_includes_images_and_excludes_token(self):
         panel = self.panel
         url = "/assets/" + "a" * 32 + ".png"

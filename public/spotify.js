@@ -106,7 +106,11 @@
     var list = cards();
     for (var i = 0; i < list.length; i++) {
       var buttons = list[i].querySelectorAll(".spotify-control");
-      for (var j = 0; j < buttons.length; j++) buttons[j].onclick = function (event) {
+      for (var j = 0; j < buttons.length; j++) if (window.Motion && !buttons[j].getAttribute("data-pressable")) {
+        buttons[j].setAttribute("data-pressable", "true");
+        Motion.pressable(buttons[j]);
+      }
+      for (j = 0; j < buttons.length; j++) buttons[j].onclick = function (event) {
         event.stopPropagation();
         if (controlling || !state || this.disabled) return;
         controlling = true; generation++; render();

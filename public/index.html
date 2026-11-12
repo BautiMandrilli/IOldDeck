@@ -5,23 +5,34 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#0b0b0d">
   <title>Mi panel</title>
   <link rel="stylesheet" href="/style.css">
 </head>
-<body>
-  <header><h1 id="title">Mi panel</h1><span id="status" class="status">Conectando</span></header>
+<body class="panel-body">
+  <header class="topbar">
+    <h1 id="title" class="topbar-title">Mi panel</h1>
+    <span id="status" class="status"><span class="status-dot"></span><span class="status-text">Conectando</span></span>
+  </header>
   <section id="pair" class="pair" style="display:none">
-    <h2>Vincular iPad</h2>
-    <p>Escribí el código de 6 números que aparece en la consola de Windows.</p>
-    <form id="pair-form">
-      <input id="pair-code" type="tel" pattern="[0-9]*" maxlength="6" placeholder="Código" autocomplete="off">
-      <button type="submit">Conectar</button>
-    </form>
-    <p id="pair-error" role="status"></p>
+    <div class="pair-card">
+      <div class="pair-glyph" aria-hidden="true">
+        <svg viewBox="0 0 48 48" width="56" height="56"><rect x="9" y="4" width="30" height="40" rx="5" fill="none" stroke="currentColor" stroke-width="2.4"/><circle cx="24" cy="38.5" r="1.8" fill="currentColor"/><path d="M18 21h12M24 15v12" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
+      </div>
+      <h2>Vincular este iPad</h2>
+      <p>Escribí el código de seis números que muestra la ventana del servidor en tu PC.</p>
+      <form id="pair-form">
+        <input id="pair-code" type="tel" pattern="[0-9]*" maxlength="6" placeholder="000000" autocomplete="off" aria-label="Código de vinculación">
+        <button type="submit">Conectar</button>
+      </form>
+      <p id="pair-error" class="pair-error" role="status"></p>
+    </div>
   </section>
-  <main id="pages"></main>
-  <nav id="tabs"></nav>
-  <div id="message" class="message" role="status"></div>
+  <main id="pages" class="pages"></main>
+  <nav id="tabs" class="tabbar" aria-label="Páginas"></nav>
+  <div id="message" class="toast-layer" role="status" aria-live="polite"></div>
+  <script src="/motion.js"></script>
+  <script src="/app-icons.js"></script>
   <script src="/layout.js"></script>
   <script src="/spotify.js"></script>
   <script src="/app.js"></script>

@@ -21,7 +21,38 @@
     ["settings", "Ajustes", "M4 3v18 M12 3v18 M20 3v18 M1 8h6 M9 16h6 M17 8h6"],
     ["bell", "Notificaciones", "M5 9a7 7 0 0 1 14 0v7l3 3H2l3-3z M9 22h6"]
   ];
+  var NS = "http://www.w3.org/2000/svg", gradientId = 0;
+  var GRADIENTS = { instagram: ["#FEDA75", "#FA7E1E", "#D62976", "#962FBF", "#4F5BD5"] };
+  function findApp(slug) {
+    var apps = root.PanelAppIcons || [];
+    for (var i = 0; i < apps.length; i++) if (apps[i].slug === slug) return apps[i];
+    return null;
+  }
+  function svgNode(tag, attrs, parent) {
+    var node = document.createElementNS(NS, tag);
+    for (var key in attrs) if (attrs.hasOwnProperty(key)) node.setAttribute(key, attrs[key]);
+    if (parent) parent.appendChild(node);
+    return node;
+  }
+  // iOS-style app icon: rounded square in the brand color with the logo centered.
+  function appIcon(slug, size) {
+    var app = findApp(slug);
+    if (!app) return symbol("grid", size);
+    var svg = svgNode("svg", { viewBox: "0 0 60 60", width: size, height: size, "aria-hidden": "true", focusable: "false", "class": "system-icon app-icon" });
+    var fill = app.bg, stops = app.bg.indexOf("gradient:") === 0 ? GRADIENTS[app.bg.slice(9)] : null;
+    if (stops) {
+      var id = "app-gradient-" + (++gradientId), defs = svgNode("defs", {}, svg);
+      var gradient = svgNode("linearGradient", { id: id, x1: "0", y1: "1", x2: "1", y2: "0" }, defs);
+      stops.forEach(function (stop, i) { svgNode("stop", { offset: i / (stops.length - 1), "stop-color": stop }, gradient); });
+      fill = "url(#" + id + ")";
+    }
+    svgNode("rect", { width: "60", height: "60", rx: "13.5", fill: fill }, svg);
+    if (app.bg.toLowerCase() === "#ffffff") svgNode("rect", { x: ".5", y: ".5", width: "59", height: "59", rx: "13", fill: "none", stroke: "rgba(0,0,0,.08)" }, svg);
+    svgNode("path", { d: app.path, fill: app.fg, transform: "translate(16 16) scale(1.1667)" }, svg);
+    return svg;
+  }
   function symbol(name, size) {
+    if (name && name.indexOf("app:") === 0) return appIcon(name.slice(4), size);
     var shape = icons[0][2];
     for (var i = 0; i < icons.length; i++) if (icons[i][0] === name) shape = icons[i][2];
     var ns = "http://www.w3.org/2000/svg", svg = document.createElementNS(ns, "svg");
@@ -167,5 +198,7 @@
     shell.style.height = Math.ceil(height * scale) + "px";
     return scale;
   }
-  root.PanelLayout = { items: items, layout: layout, paint: paint, background: background, position: position, fit: fit, icons: icons, symbol: symbol };
+  // Size in design pixels of a span of n grid boxes.
+  function span(n) { return n * CELL + (n - 1) * GAP; }
+  root.PanelLayout = { findApp: findApp, grid: { width: WIDTH, pad: PAD, gap: GAP, cell: CELL, cols: 6, rows: 4 }, span: span, items: items, layout: layout, paint: paint, background: background, position: position, fit: fit, icons: icons, symbol: symbol };
 }(this));

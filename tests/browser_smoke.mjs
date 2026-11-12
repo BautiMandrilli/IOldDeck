@@ -85,7 +85,7 @@ try {
   await evaluate('var locationSelect = Array.prototype.filter.call(document.querySelectorAll("#button-controls select"),function(s){return s.parentNode.firstChild.textContent === "Ubicación"})[0]; locationSelect.selectedIndex=1; locationSelect.dispatchEvent(new Event("change",{bubbles:true}))');
   assert.equal(await evaluate('document.querySelectorAll(".designer-button").length'), 2);
   // Icon-only keeps the accessible name, hides the text and persists in a folder.
-  await evaluate('var presentation=Array.prototype.filter.call(document.querySelectorAll("#button-controls select"),function(s){return s.parentNode.firstChild.textContent === "Mostrar en el botón"})[0];presentation.value="icon";presentation.dispatchEvent(new Event("change",{bubbles:true}))');
+  await evaluate('document.querySelector("#button-controls .segmented[aria-label^=Mostrar] [data-value=icon]").click()');
   await evaluate('document.querySelector(".icon-option[aria-label=Micrófono]").click()');
   assert.equal(await evaluate('!!document.querySelector(".designer-button[data-id=mute] .button-label")'), false);
   assert.equal(await evaluate('!!document.querySelector(".designer-button[data-id=mute] svg")'), true);
@@ -102,15 +102,16 @@ try {
   await evaluate('document.querySelector("#folder-navigation button").click()');
   // Multi-cell sizing and switching modes must preserve legacy geometry.
   await evaluate('document.querySelector(".designer-button[data-id=deafen]").click()');
-  await evaluate('Array.prototype.filter.call(document.querySelectorAll("#button-controls button"),function(b){return b.textContent === "2 × 1"})[0].click()');
+  await evaluate('var cols=document.getElementById("grid-cols");cols.value="2";cols.dispatchEvent(new Event("input",{bubbles:true}))');
   assert.ok(await evaluate('parseFloat(document.querySelector(".designer-button[data-id=deafen]").style.width) > 300'));
   async function mode(value) {
-    await evaluate('var modeSelect=Array.prototype.filter.call(document.querySelectorAll("#page-controls select"),function(s){return s.parentNode.firstChild.textContent === "Distribución"})[0]; modeSelect.value=' + JSON.stringify(value) + ';modeSelect.dispatchEvent(new Event("change",{bubbles:true}))');
+    await evaluate('document.querySelector("#page-controls .segmented[aria-label=Distribución] [data-value=' + value + ']").click()');
   }
   await mode('free');
   assert.equal(await evaluate('document.querySelector(".designer-button[data-id=deafen]").style.left'), '342px');
   assert.equal(await evaluate('document.querySelector(".designer-button[data-id=deafen]").style.width'), '300px');
   await mode('grid');
+  await delay(600); // let the layout glide settle before measuring tile centers
   assert.ok(await evaluate('parseFloat(document.querySelector(".designer-button[data-id=deafen]").style.width) > 300'));
   // Actual pointer drag reorders grid items without changing their free positions.
   const drag = await evaluate('Array.prototype.map.call(document.querySelectorAll(".designer-button"),function(b){var r=b.getBoundingClientRect();return {id:b.getAttribute("data-id"),x:r.left+r.width/2,y:r.top+r.height/2}})');
@@ -119,6 +120,15 @@ try {
   await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: to.x, y: to.y, button: 'left', buttons: 1 });
   await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: to.x, y: to.y, button: 'left', clickCount: 1 });
   assert.equal(await evaluate('document.querySelector(".designer-button").getAttribute("data-id")'), 'google');
+  // Dragging the grid corner handle one box to the right makes the tile 2 boxes wide.
+  await delay(500);
+  const grip = await evaluate('(function(){var h=document.querySelector(".designer-button[data-id=google] .resize-handle[data-handle=span]");var r=h.getBoundingClientRect();var s=document.getElementById("preview-shell").clientWidth/1024;return {x:r.left+r.width/2,y:r.top+r.height/2,step:(1024-48-80)/6*s+16*s}})()');
+  await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: grip.x, y: grip.y, button: 'left', clickCount: 1 });
+  await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: grip.x + grip.step, y: grip.y + 4, button: 'left', buttons: 1 });
+  assert.equal(await evaluate('document.querySelector(".span-badge").textContent'), '2 × 1');
+  await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: grip.x + grip.step, y: grip.y + 4, button: 'left', clickCount: 1 });
+  assert.equal(await evaluate('document.getElementById("grid-cols").value'), '2');
+  assert.equal(await evaluate('!!document.querySelector(".span-badge")'), false);
   await evaluate('document.getElementById("save").click()');
   await until(() => evaluate('document.getElementById("editor-message").textContent.indexOf("Cambios guardados")===0'), 'grid save');
   const artifactDir = path.join(root, '.cache'); await mkdir(artifactDir, { recursive: true });
@@ -186,8 +196,14 @@ try {
   await evaluate('Array.prototype.filter.call(document.querySelectorAll("#button-controls button"),function(b){return b.textContent === "Eliminar"})[0].click()');
   await evaluate('window.confirm=function(){return true};Array.prototype.filter.call(document.querySelectorAll("#button-controls button"),function(b){return b.textContent === "Eliminar carpeta y contenido"})[0].click()');
   assert.equal(await evaluate('document.querySelectorAll(".designer-button").length'), 4);
-  await evaluate('document.getElementById("save").click()');
-  await until(() => evaluate('document.getElementById("editor-message").textContent.indexOf("Cambios guardados")===0'), 'delete contents save');
+  // Adding then deleting the same folder returns to the saved model, so nothing is pending.
+  assert.equal(await evaluate('document.getElementById("save").disabled'), true);
+  // Undo brings the folder back; redo removes it again.
+  await evaluate('document.getElementById("undo").click()');
+  assert.equal(await evaluate('document.querySelectorAll(".designer-button").length'), 5);
+  await evaluate('document.getElementById("redo").click()');
+  assert.equal(await evaluate('document.querySelectorAll(".designer-button").length'), 4);
+  assert.equal(await evaluate('document.getElementById("save").disabled'), true);
   // A real widget DOM (not a button wrapper), driven by the isolated Spotify backend.
   await evaluate('document.getElementById("add-spotify").click()');
   assert.equal(await evaluate('document.querySelectorAll(".spotify-card").length'), 1);
@@ -213,6 +229,56 @@ try {
   await cdp('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
   await delay(100);
   await screenshot('spotify-desktop.png');
+  // A second page shows the floating page switcher; tapping a tab slides to that page.
+  await cdp('Page.navigate', { url: base + '/editor' });
+  await until(() => evaluate('document.querySelectorAll(".page-row").length===1'), 'editor pages');
+  await evaluate('document.getElementById("add-page").click()');
+  assert.equal(await evaluate('document.querySelectorAll(".page-row").length'), 2);
+  // App library: search, pick YouTube, and the new button becomes a shortcut to youtube.com.
+  await evaluate('document.getElementById("add-button").click()');
+  await evaluate('var s=document.querySelector(".app-search");s.value="you";s.dispatchEvent(new Event("input",{bubbles:true}))');
+  assert.equal(await evaluate('document.querySelectorAll(".app-option").length'), 1);
+  await evaluate('document.querySelector(".app-option[data-app=youtube]").click()');
+  assert.equal(await evaluate('document.querySelector(".inspector-names strong").textContent'), 'YouTube');
+  assert.equal(await evaluate('!!document.querySelector(".designer-button.is-selected svg.app-icon")'), true);
+  // Collapse all hides every section; expand all brings them back.
+  await evaluate('document.querySelector(".collapse-all").click()');
+  assert.equal(await evaluate('document.querySelectorAll("#button-controls .group.is-collapsed").length === document.querySelectorAll("#button-controls .group-toggle").length'), true);
+  assert.equal(await evaluate('document.querySelector(".collapse-all").textContent'), 'Expandir todo');
+  await evaluate('document.querySelector(".collapse-all").click()');
+  assert.equal(await evaluate('document.querySelectorAll("#button-controls .group.is-collapsed").length'), 0);
+  await evaluate('document.querySelector(".group-toggle[data-section=avanzado]").click()');
+  await screenshot('apps-editor.png');
+  await evaluate('document.getElementById("save").click()');
+  await until(() => evaluate('document.getElementById("editor-message").textContent.indexOf("Cambios guardados")===0'), 'page save');
+  await cdp('Emulation.setDeviceMetricsOverride', { width: 1024, height: 768, deviceScaleFactor: 1, mobile: false });
+  await cdp('Page.navigate', { url: base + '/' });
+  await until(() => evaluate('document.querySelectorAll("#tabs .tab").length===2'), 'page tabs');
+  await evaluate('document.querySelectorAll("#tabs .tab")[1].click()');
+  await until(() => evaluate('document.querySelector(".page-title").textContent==="Nueva página" && !document.getElementById("page-track").style.transform'), 'tab page change');
+  assert.equal(await evaluate('document.querySelectorAll("#tabs .tab")[1].className.indexOf("selected")>=0'), true);
+  assert.equal(await evaluate('!!document.querySelector("#pages button[data-id] svg.app-icon")'), true);
+  const savedApp = (await (await fetch(base + '/api/config', { headers: { 'X-Panel-Token': token } })).json()).pages[1].buttons[0];
+  assert.equal(savedApp.builtinIcon, 'app:youtube');
+  assert.equal(savedApp.value, 'https://www.youtube.com/');
+  await delay(500);
+  await screenshot('tabs-ipad.png');
+  // A short rightward flick returns to the first page; a tiny drag springs back.
+  await cdp('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 });
+  async function swipe(fromX, toX, steps) {
+    await cdp('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: fromX, y: 420 }] });
+    for (let i = 1; i <= steps; i++) {
+      await cdp('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: fromX + (toX - fromX) * i / steps, y: 420 }] });
+      await delay(8);
+    }
+    await cdp('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  }
+  await swipe(400, 440, 4);
+  await until(() => evaluate('!document.getElementById("page-track").style.transform'), 'spring back');
+  assert.equal(await evaluate('document.querySelector(".page-title").textContent'), 'Nueva página');
+  await swipe(200, 620, 8);
+  await until(() => evaluate('document.querySelector(".page-title").textContent==="Inicio" && !document.getElementById("page-track").style.transform'), 'swipe to previous page');
+  assert.equal(await evaluate('document.querySelectorAll("#tabs .tab")[0].className.indexOf("selected")>=0'), true);
   assert.deepEqual(browserErrors, []);
   console.log('Browser passed: editor, simplified controls, folder CRUD, save/reload, iPad panel, folder action/feedback/polling, Escape/focus and binary backup/restore. Screenshots in .cache/.');
   await cdp('Browser.close');
