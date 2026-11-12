@@ -395,15 +395,28 @@
     var glyph = el("div", "empty-glyph"); glyph.appendChild(PanelLayout.symbol("grid", 30));
     empty.appendChild(glyph);
     empty.appendChild(el("h2", "", "Nada seleccionado"));
-    empty.appendChild(el("p", "hint", "Hacé clic en un elemento de la vista previa para editarlo, o agregá uno nuevo desde la barra superior."));
+    empty.appendChild(el("p", "hint", "Hacé clic en un elemento de la vista previa para editarlo, o agregá uno nuevo con los botones de la derecha: Nuevo botón, Nueva carpeta o Widget de Spotify."));
+    empty.appendChild(el("h3", "shortcut-title", "Atajos de teclado"));
     var keys = el("dl", "shortcut-list");
-    [["Ctrl Z", "Deshacer"], ["Ctrl S", "Guardar"], ["Ctrl D", "Duplicar"], ["Supr", "Eliminar"], ["Flechas", "Mover en modo libre"], ["Esc", "Salir de la selección"]].forEach(function (k) {
-      keys.appendChild(el("dt", "", k[0])); keys.appendChild(el("dd", "", k[1]));
+    [["Ctrl Z", "Deshacer"], ["Ctrl Shift Z", "Rehacer"], ["Ctrl S", "Guardar"], ["Ctrl D", "Duplicar"], ["Supr", "Eliminar"], ["Flechas", "Mover en modo libre"], ["Esc", "Salir de la selección"], ["Ctrl Alt [ / ]", "Ocultar barras laterales"]].forEach(function (k) {
+      var row = el("div", "shortcut-row");
+      row.appendChild(el("dt", "", k[0])); row.appendChild(el("dd", "", k[1]));
+      keys.appendChild(row);
     });
     empty.appendChild(keys);
     root.appendChild(empty);
   }
+  // Actions on the selected item live in the bottom dock, not the inspector.
+  function updateDock() {
+    var b = model && selected(), grid = !model || isGrid();
+    ["dock-duplicate", "dock-before", "dock-after", "dock-delete"].forEach(function (id) { $(id).disabled = !b; });
+    $("dock-before").lastChild.textContent = grid ? "Antes" : "Al frente";
+    $("dock-before").title = grid ? "Mover antes" : "Traer al frente";
+    $("dock-after").lastChild.textContent = grid ? "Después" : "Atrás";
+    $("dock-after").title = grid ? "Mover después" : "Enviar atrás";
+  }
   function drawButtonControls() {
+    updateDock();
     var root = $("button-controls"); clear(root);
     collapseAll = null;
     if (!model || !selected()) { drawEmptyInspector(root); return; }
@@ -546,13 +559,6 @@
       more.appendChild(preview);
     }
 
-    var row = el("div", "inspector-actions");
-    var grid = isGrid();
-    row.appendChild(command("Duplicar", duplicate));
-    row.appendChild(command(grid ? "Antes" : "Al frente", function () { layer(grid ? -1 : 1); }));
-    row.appendChild(command(grid ? "Después" : "Atrás", function () { layer(grid ? 1 : -1); }));
-    row.appendChild(command("Eliminar", removeButton, "danger"));
-    root.appendChild(row);
     updateCollapseAll();
   }
 
@@ -601,6 +607,9 @@
     var canvas = $("preview-canvas"), layout = PanelLayout.layout(page(), folderId);
     layout.items.forEach(function (item) { var n = nodeFor(item.id); if (n) PanelLayout.position(n, layout.boxes[item.id]); });
     scale = PanelLayout.fit($("preview-shell"), canvas, layout.height);
+    var stage = document.querySelector(".stage");
+    stage.classList.toggle("is-compact", stage.clientWidth < 900);
+    stage.classList.toggle("is-narrow", stage.clientWidth < 720);
     drawGuides(canvas, layout);
   }
   // ---------- Preview ----------
@@ -674,7 +683,7 @@
       trail.appendChild(back);
       trail.appendChild(el("span", "crumb-separator", "/"));
       trail.appendChild(el("strong", "crumb-current", currentFolder.label));
-    } else trail.appendChild(el("strong", "crumb-current", p.title || "Página"));
+    }
     $("add-folder").disabled = !!folderId;
     $("stage-hint").textContent = layout.grid
       ? "Arrastrá para reordenar · Arrastrá la esquina para ocupar más casillas · Doble clic en una carpeta para abrirla"
@@ -822,7 +831,7 @@
     kind = kind === "folder" || kind === "spotify" ? kind : "button";
     var count = page().buttons.length;
     var b = { id: uid(), type: kind, displayMode: kind === "folder" ? "both" : "label", builtinIcon: "", folderId: kind === "folder" ? "" : folderId, cols: 1, rows: 1, label: kind === "folder" ? "Nueva carpeta" : "Nuevo botón", x: 36 + (count * 42) % 700, y: 36 + (count * 42) % 400,
-      w: 260, h: 120, backgroundColor: kind === "folder" ? "#48484a" : "#0a84ff", textColor: "#ffffff", borderColor: "#48484a", borderWidth: 0,
+      w: 260, h: 120, backgroundColor: kind === "folder" ? "#3a8ef6" : "#0a84ff", textColor: "#ffffff", borderColor: "#48484a", borderWidth: 0,
       radius: 30, fontSize: 20, iconSize: 52, opacity: 100, textAlign: "center", animation: "none", icon: "", image: "",
       action: kind === "folder" ? "folder" : "url", value: kind === "folder" ? "" : "https://www.google.com/", feedback: { mode: "none", activeLabel: "Activo", activeColor: "#b91c1c", activeIcon: "" } };
     if (kind === "spotify") {
@@ -906,7 +915,7 @@
   $("panel-title").oninput = function () { if (model) { model.title = this.value; changed(this); } };
   $("add-page").onclick = function () {
     if (!model || model.pages.length >= 12) { message("Máximo 12 páginas.", "error"); return; }
-    model.pages.push({ id: uid(), title: "Nueva página", layout: "grid", height: 620, backgroundColor: "#161618", backgroundImage: "", backgroundAnimation: "none", buttons: [] });
+    model.pages.push({ id: uid(), title: "Nueva página", layout: "grid", height: 528, backgroundColor: "#161618", backgroundImage: "", backgroundAnimation: "none", buttons: [] });
     pageIndex = model.pages.length - 1; folderId = ""; selectedId = null; changed(); drawAll();
   };
   $("delete-page").onclick = function () {
@@ -923,6 +932,10 @@
   $("save").onclick = save;
   $("undo").onclick = undo;
   $("redo").onclick = redo;
+  $("dock-duplicate").onclick = duplicate;
+  $("dock-before").onclick = function () { var grid = isGrid(); layer(grid ? -1 : 1); };
+  $("dock-after").onclick = function () { var grid = isGrid(); layer(grid ? 1 : -1); };
+  $("dock-delete").onclick = removeButton;
 
   document.addEventListener("keydown", function (e) {
     var key = (e.key || "").toLowerCase(), mod = e.ctrlKey || e.metaKey;
@@ -1005,6 +1018,97 @@
       message("Respaldo válido. Revisá el resumen antes de reemplazar el panel.", "info");
     });
   };
+  // Resizable, collapsible sidebars. Drag the edge to resize, click it (or the
+  // toolbar toggles) to hide/show. Widths and state persist per browser.
+  var PANES_KEY = "panel_editor_panes";
+  var paneDefaults = { left: 300, right: 360 }, paneLimits = { left: [220, 480], right: [300, 560] };
+  var panes;
+  try { panes = JSON.parse(localStorage.getItem(PANES_KEY)) || {}; } catch (e) { panes = {}; }
+  function rememberPanes() { try { localStorage.setItem(PANES_KEY, JSON.stringify(panes)); } catch (e) { /* private mode */ } }
+  function paneNode(side) { return $(side === "left" ? "sidebar" : "inspector"); }
+  function paneResizer(side) { return document.querySelector('.sidebar-resizer[data-side="' + side + '"]'); }
+  function paneWidth(side, width) {
+    var limits = paneLimits[side];
+    return Math.round(Math.max(limits[0], Math.min(limits[1], width || paneDefaults[side])));
+  }
+  function applyPane(side) {
+    var node = paneNode(side), resizer = paneResizer(side), toggle = $(side === "left" ? "toggle-sidebar" : "toggle-inspector");
+    var hidden = !!panes[side + "Hidden"], width = paneWidth(side, panes[side]);
+    var name = side === "left" ? "barra de páginas" : "inspector";
+    node.style.width = width + "px"; node.style.flexBasis = width + "px";
+    // Content grows with the pane: wider bar, bigger text and controls.
+    var content = side === "left" ? node.querySelector(".sidebar-content") : $("button-controls");
+    var scale = Math.max(0.92, Math.min(1.4, 1 + (width - paneDefaults[side]) / paneDefaults[side] * 0.75));
+    content.style.zoom = scale.toFixed(3);
+    node.classList.toggle("is-collapsed", hidden);
+    node.setAttribute("aria-hidden", hidden ? "true" : "false");
+    resizer.classList.toggle("is-collapsed", hidden);
+    resizer.setAttribute("aria-valuenow", hidden ? 0 : width);
+    resizer.title = hidden ? "Clic para mostrar la " + name : "Arrastrá para cambiar el ancho · clic para ocultar";
+    toggle.classList.toggle("is-off", hidden);
+    toggle.setAttribute("aria-expanded", hidden ? "false" : "true");
+    toggle.title = (hidden ? "Mostrar " : "Ocultar ") + name + (side === "left" ? " (Ctrl+Alt+[)" : " (Ctrl+Alt+])");
+    toggle.setAttribute("aria-label", (hidden ? "Mostrar " : "Ocultar ") + name);
+  }
+  function togglePane(side) {
+    panes[side + "Hidden"] = !panes[side + "Hidden"];
+    applyPane(side); rememberPanes();
+    // Redraw once the width transition has finished so the canvas fits.
+    setTimeout(function () { if (model) drawPreview(); }, 340);
+  }
+  ["left", "right"].forEach(function (side) {
+    var resizer = paneResizer(side), workspace = document.querySelector(".workspace");
+    applyPane(side);
+    $(side === "left" ? "toggle-sidebar" : "toggle-inspector").onclick = function () { togglePane(side); };
+    resizer.addEventListener("mousedown", function (event) {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      var startX = event.clientX, hidden = !!panes[side + "Hidden"];
+      var start = hidden ? 0 : paneWidth(side, panes[side]), moved = false, frame = 0;
+      function move(e) {
+        var dx = e.clientX - startX;
+        if (!moved && Math.abs(dx) < 4) return;
+        if (!moved) {
+          moved = true; workspace.classList.add("is-resizing"); resizer.classList.add("active");
+          if (hidden) { panes[side + "Hidden"] = false; hidden = false; }
+        }
+        var width = start + (side === "left" ? dx : -dx);
+        // Dragging well past the minimum hides the pane, like Finder.
+        panes[side + "Hidden"] = width < paneLimits[side][0] - 70;
+        if (!panes[side + "Hidden"]) panes[side] = paneWidth(side, width);
+        applyPane(side);
+        if (!frame) frame = requestAnimationFrame(function () { frame = 0; if (model) drawPreview(); });
+      }
+      function up() {
+        document.removeEventListener("mousemove", move);
+        document.removeEventListener("mouseup", up);
+        workspace.classList.remove("is-resizing"); resizer.classList.remove("active");
+        if (!moved) { togglePane(side); return; }
+        rememberPanes(); if (model) drawPreview();
+      }
+      document.addEventListener("mousemove", move);
+      document.addEventListener("mouseup", up);
+    });
+    resizer.addEventListener("dblclick", function () {
+      panes[side] = paneDefaults[side]; panes[side + "Hidden"] = false;
+      applyPane(side); rememberPanes(); if (model) drawPreview();
+    });
+    resizer.addEventListener("keydown", function (event) {
+      var key = event.key, grow = side === "left" ? "ArrowRight" : "ArrowLeft", shrink = side === "left" ? "ArrowLeft" : "ArrowRight";
+      if (key === "Enter" || key === " ") { event.preventDefault(); togglePane(side); return; }
+      if (key !== grow && key !== shrink) return;
+      event.preventDefault();
+      panes[side + "Hidden"] = false;
+      panes[side] = paneWidth(side, paneWidth(side, panes[side]) + (key === grow ? 20 : -20));
+      applyPane(side); rememberPanes(); if (model) drawPreview();
+    });
+  });
+  document.addEventListener("keydown", function (e) {
+    if (!(e.ctrlKey || e.metaKey) || !e.altKey) return;
+    if (e.code === "BracketLeft") { e.preventDefault(); togglePane("left"); }
+    else if (e.code === "BracketRight") { e.preventDefault(); togglePane("right"); }
+  });
+
   window.onresize = function () { if (model) drawPreview(); };
   window.onbeforeunload = function () { if (dirty) return "Hay cambios sin guardar."; };
   drawEmptyInspector($("button-controls"));

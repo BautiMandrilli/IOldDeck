@@ -37,7 +37,7 @@ TOKEN = TOKEN_FILE.read_text(encoding="ascii").strip()
 DEFAULT = {
     "title": "Mi panel",
     "pages": [
-        {"id": "inicio", "title": "Inicio", "layout": "grid", "height": 620, "backgroundColor": "#111827", "backgroundImage": "", "backgroundAnimation": "none", "buttons": [
+        {"id": "inicio", "title": "Inicio", "layout": "grid", "height": 528, "backgroundColor": "#111827", "backgroundImage": "", "backgroundAnimation": "none", "buttons": [
             {"id": "mute", "label": "Mutear Discord", "x": 24, "y": 24, "w": 300, "h": 125, "backgroundColor": "#6d28d9", "textColor": "#ffffff", "radius": 18, "animation": "none", "icon": "", "image": "", "action": "hotkey", "value": "ctrl+shift+m", "feedback": {"mode": "toggle", "activeLabel": "🔇 Discord muteado", "activeColor": "#b91c1c", "activeIcon": ""}},
             {"id": "deafen", "label": "Ensordecer Discord", "x": 342, "y": 24, "w": 300, "h": 125, "backgroundColor": "#1d4ed8", "textColor": "#ffffff", "radius": 18, "animation": "none", "icon": "", "image": "", "action": "hotkey", "value": "ctrl+shift+d", "feedback": {"mode": "toggle", "activeLabel": "🔇 Discord ensordecido", "activeColor": "#b91c1c", "activeIcon": ""}},
             {"id": "google", "label": "Abrir Google", "x": 24, "y": 167, "w": 618, "h": 125, "backgroundColor": "#15803d", "textColor": "#ffffff", "radius": 18, "animation": "none", "icon": "", "image": "", "action": "url", "value": "https://www.google.com/"}
@@ -138,7 +138,7 @@ def validate(raw):
         if not re.fullmatch(r"[a-zA-Z0-9_-]+", pid) or pid in ids:
             raise ValueError("ID de página inválido o repetido")
         ids.add(pid)
-        height = integer(page.get("height"), 400, 1400, 620)
+        height = integer(page.get("height"), 400, 1400, 528)
         buttons = []
         if not isinstance(page.get("buttons", []), list) or len(page.get("buttons", [])) > 80:
             raise ValueError("Máximo 80 elementos por página")

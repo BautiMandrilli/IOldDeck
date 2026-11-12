@@ -160,7 +160,22 @@ try {
   await cdp('Emulation.setDeviceMetricsOverride', { width: 1024, height: 768, deviceScaleFactor: 1, mobile: false });
   await cdp('Page.navigate', { url: base + '/' });
   await until(() => evaluate('document.querySelectorAll("#pages button[data-id]").length===3'), 'iPad panel');
+  // No top bar: the connection pill sits on the page-title line.
+  assert.equal(await evaluate('!!document.querySelector(".topbar")'), false);
+  await until(() => evaluate('document.getElementById("status").className==="status online"'), 'status online');
+  assert.equal(await evaluate('document.querySelector("#status .status-text").textContent'), 'Conectado');
+  assert.ok(Math.abs(await evaluate('document.getElementById("status").getBoundingClientRect().top - document.querySelector(".page-title").getBoundingClientRect().top')) < 4, 'pill on title line');
   await screenshot('panel-ipad.png');
+  // Requests failing after a good connection: Reconectando… then Conexión perdida; recovery returns to Conectado.
+  await evaluate('window.__send=XMLHttpRequest.prototype.send;XMLHttpRequest.prototype.send=function(){var x=this;setTimeout(function(){x.onerror()},0)}');
+  await evaluate('document.getElementById("status").click()');
+  await until(() => evaluate('document.getElementById("status").className==="status reconnecting"'), 'status reconnecting');
+  await evaluate('document.getElementById("status").click()'); await evaluate('document.getElementById("status").click()');
+  await until(() => evaluate('document.getElementById("status").className==="status lost"'), 'status lost');
+  assert.equal(await evaluate('document.querySelector("#status .status-text").textContent'), 'Conexión perdida');
+  await screenshot('panel-status-lost.png');
+  await evaluate('XMLHttpRequest.prototype.send=window.__send;document.getElementById("status").click()');
+  await until(() => evaluate('document.getElementById("status").className==="status online"'), 'status recovered');
   await evaluate('document.querySelector("button[data-id=' + folder.id + ']").click()');
   await until(() => evaluate('!!document.querySelector("#folder-overlay button[data-id=mute]")'), 'folder open');
   assert.equal(await evaluate('!!document.querySelector("#folder-overlay button[data-id=mute] .button-label")'), false);
@@ -197,7 +212,7 @@ try {
   await cdp('Page.navigate', { url: base + '/editor' });
   await until(() => evaluate('document.querySelectorAll(".designer-button").length===3'), 'editor for delete');
   await evaluate('document.querySelector(".designer-button[data-id=' + folder.id + ']").click()');
-  await evaluate('Array.prototype.filter.call(document.querySelectorAll("#button-controls button"),function(b){return b.textContent === "Eliminar"})[0].click()');
+  await evaluate('document.getElementById("dock-delete").click()');
   await evaluate('document.querySelector("#button-controls button").click()');
   assert.equal(await evaluate('document.querySelectorAll(".designer-button").length'), 4);
   await evaluate('document.getElementById("save").click()');
@@ -210,7 +225,7 @@ try {
   await evaluate('document.getElementById("add-button").click()');
   await evaluate('document.querySelector("#folder-navigation button").click()');
   await evaluate('var tiles=document.querySelectorAll(".designer-button");tiles[tiles.length-1].click()');
-  await evaluate('Array.prototype.filter.call(document.querySelectorAll("#button-controls button"),function(b){return b.textContent === "Eliminar"})[0].click()');
+  await evaluate('document.getElementById("dock-delete").click()');
   await evaluate('window.confirm=function(){return true};Array.prototype.filter.call(document.querySelectorAll("#button-controls button"),function(b){return b.textContent === "Eliminar carpeta y contenido"})[0].click()');
   assert.equal(await evaluate('document.querySelectorAll(".designer-button").length'), 4);
   // Adding then deleting the same folder returns to the saved model, so nothing is pending.
@@ -269,6 +284,29 @@ try {
   assert.equal(await evaluate('document.querySelectorAll("#button-controls .group.is-collapsed").length'), 0);
   await evaluate('document.querySelector(".group-toggle[data-section=avanzado]").click()');
   await screenshot('apps-editor.png');
+  // Sidebars: drag the inspector edge to widen it, click the edge to hide, toolbar toggle to show.
+  const edge = JSON.parse(await evaluate('(function(){var r=document.querySelector(".sidebar-resizer[data-side=right]").getBoundingClientRect();return JSON.stringify({x:r.left,y:r.top+r.height/2,w:document.getElementById("inspector").offsetWidth})})()'));
+  await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: edge.x, y: edge.y, button: 'left', clickCount: 1 });
+  await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: edge.x - 60, y: edge.y, button: 'left', buttons: 1 });
+  await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: edge.x - 60, y: edge.y, button: 'left', clickCount: 1 });
+  assert.equal(await evaluate('document.getElementById("inspector").offsetWidth'), edge.w + 60);
+  assert.equal(await evaluate('JSON.parse(localStorage.getItem("panel_editor_panes")).right'), edge.w + 60);
+  assert.ok(Number(await evaluate('document.getElementById("button-controls").style.zoom')) > 1.1, 'inspector content scales up');
+  await screenshot('editor-wide-inspector.png');
+  await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: edge.x - 60, y: edge.y, button: 'left', clickCount: 1 });
+  await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: edge.x - 60, y: edge.y, button: 'left', clickCount: 1 });
+  assert.equal(await evaluate('document.getElementById("inspector").classList.contains("is-collapsed")'), true);
+  await evaluate('document.getElementById("toggle-sidebar").click()');
+  assert.equal(await evaluate('document.getElementById("sidebar").classList.contains("is-collapsed")'), true);
+  await new Promise((resolve) => setTimeout(resolve, 450));
+  await screenshot('editor-collapsed.png');
+  await evaluate('document.getElementById("toggle-sidebar").click(); document.getElementById("toggle-inspector").click()');
+  assert.equal(await evaluate('document.querySelectorAll(".sidebar.is-collapsed").length'), 0);
+  await evaluate('localStorage.removeItem("panel_editor_panes")');
+  // With nothing selected the inspector shows larger instructions.
+  await evaluate('document.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape",bubbles:true}))');
+  assert.equal(await evaluate('document.querySelectorAll("#button-controls .shortcut-row").length'), 8);
+  await screenshot('editor-empty.png');
   // Discord is "installed" in this fixture: picking it makes the button open the desktop app.
   await evaluate('document.getElementById("add-button").click()');
   await evaluate('var s=document.querySelector(".app-search");s.value="disc";s.dispatchEvent(new Event("input",{bubbles:true}))');

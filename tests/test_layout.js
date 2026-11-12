@@ -25,6 +25,10 @@ for (let i = 0; i < boxes.length; i++) {
   }
 }
 assert.equal(JSON.stringify(page), original, "layout never overwrites saved free positions");
+// An empty or three-row grid page is exactly three boxes tall: no dead space below, no scrolling on the iPad.
+const short = layout({ buttons: [{ id: "s", cols: 1, rows: 3, x: 0, y: 0, w: 1, h: 1, folderId: "" }], layout: "grid", height: 620 }, "");
+assert.equal(Math.round(short.height), 528);
+assert.equal(Math.round(layout({ buttons: [], layout: "grid", height: 620 }, "").height), 528);
 page.layout = "free";
 const free = layout(page, "");
 assert.equal(free.boxes.b0.x, 30);

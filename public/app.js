@@ -44,6 +44,8 @@
       else done(result.error || "Sin conexión con la computadora", null, xhr.status);
     };
     xhr.onerror = function () { done("Sin conexión con la computadora", null, 0); };
+    xhr.timeout = 8000;
+    xhr.ontimeout = function () { done("La computadora no responde", null, 0); };
     xhr.send(body ? JSON.stringify(body) : null);
   }
 
@@ -56,10 +58,36 @@
     clearTimeout(messageTimer);
     messageTimer = setTimeout(function () { toast.className = "toast " + (kind || "info"); }, 2600);
   }
-  function setStatus(ok) {
+  // Connection states (also documented in CLAUDE.md). Every request reports its
+  // HTTP status here; tapping the pill explains the state and retries at once.
+  var CONNECTION = {
+    connecting: ["Conectando…", "Buscando el servidor en la PC…"],
+    online: ["Conectado", "Conectado con la PC."],
+    reconnecting: ["Reconectando…", "La PC no respondió. Reintentando…"],
+    lost: ["Conexión perdida", "La PC dejó de responder. Se reintenta solo cada pocos segundos."],
+    "server-down": ["Servidor apagado", "No se encuentra el servidor. Iniciá Panel Propio en la PC y revisá que estén en la misma Wi-Fi."],
+    "no-network": ["Sin Wi-Fi", "El iPad no tiene red. Conectalo a la misma Wi-Fi que la PC."],
+    "server-error": ["Error del servidor", "El servidor respondió con un error. Revisá su ventana en la PC."],
+    unpaired: ["Sin vincular", "Escribí el código de 6 números que muestra la PC."]
+  };
+  var connection = "connecting", everConnected = false, failures = 0;
+  function setConnection(state) {
+    if (state === connection) return;
+    connection = state;
     var el = $("status");
-    el.querySelector(".status-text").textContent = ok ? "Conectado" : "Sin conexión";
-    el.className = ok ? "status online" : "status offline";
+    el.className = "status " + state;
+    el.querySelector(".status-text").textContent = CONNECTION[state][0];
+    el.setAttribute("aria-label", "Conexión: " + CONNECTION[state][0]);
+    el.title = CONNECTION[state][1];
+  }
+  function setStatus(status) {
+    if (status === 401) { setConnection("unpaired"); return; }
+    if (status >= 500) { failures = 0; setConnection("server-error"); return; }
+    if (status > 0) { failures = 0; everConnected = true; setConnection("online"); return; }
+    failures++;
+    if (navigator.onLine === false) setConnection("no-network");
+    else if (everConnected) setConnection(failures < 3 ? "reconnecting" : "lost");
+    else setConnection(failures < 2 ? "connecting" : "server-down");
   }
   function showPair(show) {
     if (show) closeFolder(true);
@@ -80,7 +108,7 @@
     request("POST", "/api/action", { id: id }, function (err, data, status) {
       button.disabled = false;
       button.classList.remove("is-busy");
-      setStatus(status !== 0);
+      setStatus(status);
       if (!err && data.states) applyStates(data);
       Motion.flash(button, err ? "did-fail" : "did-fire", 600);
       if (err) showMessage(err, "error");
@@ -100,7 +128,8 @@
   }
   function refreshStates() {
     if (!token) return;
-    request("GET", "/api/state", null, function (err, data) {
+    request("GET", "/api/state", null, function (err, data, status) {
+      setStatus(status);
       if (!err && data.states) applyStates(data);
     });
   }
@@ -338,21 +367,20 @@
   });
   function load() {
     if (!token) {
-      setStatus(false);
+      setConnection("unpaired");
       showPair(true);
       return;
     }
     request("GET", "/api/config", null, function (err, data, status) {
-      setStatus(status !== 0);
+      setStatus(status);
       if (status === 401) {
         token = "";
         localStorage.removeItem("panel_token");
         showPair(true);
         return;
       }
-      if (err) { showMessage(err, "error"); return; }
+      if (err) { if (status) showMessage(err, "error"); return; }
       showPair(false);
-      $("title").textContent = data.title;
       document.title = data.title;
       var nextSignature = JSON.stringify(data);
       if (signature === nextSignature) return;
@@ -390,6 +418,14 @@
   $("pair-form").onsubmit = function (event) { event.preventDefault(); pair(); };
   $("pair-code").oninput = function () { if (/^[0-9]{6}$/.test(this.value)) pair(); };
   Motion.pressable(document.querySelector("#pair-form button"));
+  Motion.pressable($("status"));
+  $("status").onclick = function () {
+    var kind = connection === "online" ? "success" : connection === "unpaired" || connection === "connecting" ? "info" : "error";
+    showMessage(CONNECTION[connection][1], kind);
+    load();
+  };
+  window.addEventListener("offline", function () { setStatus(0); }, false);
+  window.addEventListener("online", function () { failures = 0; load(); }, false);
   load();
   window.onresize = function () { if (pages.length) draw(); };
   setInterval(load, 10000);

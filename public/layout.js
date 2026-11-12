@@ -2,6 +2,8 @@
 (function (root) {
   "use strict";
   var WIDTH = 1024, GAP = 16, PAD = 24, CELL = (WIDTH - PAD * 2 - GAP * 5) / 6;
+  // A grid page is exactly three rows tall (528px) so it fits the iPad screen without scrolling.
+  var GRID_MIN = Math.round(PAD * 2 + CELL * 3 + GAP * 2);
   // Original line symbols, rendered locally without fonts or external libraries.
   var icons = [
     ["grid", "Aplicaciones", "M4 4h6v6H4z M14 4h6v6h-6z M4 14h6v6H4z M14 14h6v6h-6z"],
@@ -94,7 +96,7 @@
       boxes[b.id] = box;
       height = Math.max(height, box.y + box.h + PAD);
     });
-    return { items: list, boxes: boxes, height: Math.max(grid ? (folderId ? 215 : 620) : page.height, height), grid: grid };
+    return { items: list, boxes: boxes, height: Math.max(grid ? (folderId ? 215 : GRID_MIN) : page.height, height), grid: grid };
   }
   function clear(el) { while (el.firstChild) el.removeChild(el.firstChild); }
   function paint(el, b, page, active) {
@@ -116,17 +118,8 @@
     if (mode === "icon") content.className += " icon-only";
     content.style.textAlign = b.textAlign;
     var visibleIcon = active && feedback.activeIcon ? feedback.activeIcon : b.icon;
-    if (mode !== "label" && b.type === "folder" && !b.image && !visibleIcon && !b.builtinIcon) {
-      var mini = document.createElement("span"); mini.className = "folder-miniatures";
-      items(page, b.id).slice(0, 9).forEach(function (child) {
-        var tile = document.createElement("span"); tile.style.backgroundColor = child.backgroundColor;
-        if (child.icon || child.image) tile.style.backgroundImage = "url('" + (child.icon || child.image) + "')";
-        else if (child.builtinIcon || child.displayMode === "icon") tile.appendChild(symbol(child.builtinIcon || "grid", 16));
-        else tile.textContent = child.label.slice(0, 1);
-        mini.appendChild(tile);
-      });
-      if (!mini.firstChild) { mini.className += " folder-empty"; mini.textContent = "+"; }
-      content.appendChild(mini);
+    if (b.type === "folder") {
+      paintFolder(el, b, page, content, mode, visibleIcon, color);
     } else if (mode !== "label" && visibleIcon) {
       var img = document.createElement("img"); img.src = visibleIcon; img.alt = "";
       img.style.width = b.iconSize + "px"; img.style.height = b.iconSize + "px";
@@ -143,6 +136,45 @@
       var badge = document.createElement("span"); badge.className = "feedback-badge";
       badge.textContent = "ESTIMADO"; el.appendChild(badge);
     }
+  }
+  // Folder tile: a real folder (back panel with a tab + front pocket) in the
+  // folder's colour, showing miniatures of what is inside and a count badge.
+  function paintFolder(el, b, page, content, mode, visibleIcon, color) {
+    el.className = el.className.replace(/\s*(is-folder|folder-no-preview|folder-no-label)/g, "") + " is-folder" +
+      (mode === "label" ? " folder-no-preview" : "") + (mode === "icon" ? " folder-no-label" : "");
+    el.style.backgroundColor = "transparent"; el.style.backgroundImage = "none";
+    var children = items(page, b.id);
+    var shape = document.createElement("span"); shape.className = "folder-shape";
+    var back = document.createElement("span"); back.className = "folder-back"; back.style.backgroundColor = color;
+    var front = document.createElement("span"); front.className = "folder-front"; front.style.backgroundColor = color;
+    if (b.image) front.style.backgroundImage = "linear-gradient(rgba(255,255,255,.18),rgba(0,0,0,.12)),url('" + b.image + "')";
+    shape.appendChild(back); shape.appendChild(front);
+    if (mode !== "label") {
+      var mini = document.createElement("span"); mini.className = "folder-miniatures";
+      if (visibleIcon) {
+        var img = document.createElement("img"); img.src = visibleIcon; img.alt = ""; img.className = "folder-own-icon"; mini.appendChild(img);
+      } else if (b.builtinIcon) {
+        var own = symbol(b.builtinIcon, 34); own.setAttribute("class", own.getAttribute("class") + " folder-own-icon"); mini.appendChild(own);
+      } else {
+        children.slice(0, 6).forEach(function (child) {
+          var tile = document.createElement("span"); tile.className = "folder-mini";
+          var isApp = child.builtinIcon && child.builtinIcon.indexOf("app:") === 0;
+          if (isApp) tile.appendChild(symbol(child.builtinIcon, 24));
+          else {
+            tile.style.backgroundColor = child.type === "spotify" ? "#1ed760" : child.backgroundColor;
+            if (child.icon || child.image) tile.style.backgroundImage = "url('" + (child.icon || child.image) + "')";
+            else if (child.builtinIcon) tile.appendChild(symbol(child.builtinIcon, 16));
+            else tile.textContent = (child.label || "?").slice(0, 1);
+          }
+          mini.appendChild(tile);
+        });
+        if (!children.length) { mini.className += " folder-empty"; mini.textContent = "Vacía"; }
+      }
+      front.appendChild(mini);
+    }
+    var count = document.createElement("span"); count.className = "folder-count";
+    count.textContent = children.length; shape.appendChild(count);
+    content.appendChild(shape);
   }
   function paintSpotify(el, b) {
     el.className += " spotify-card";

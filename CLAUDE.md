@@ -42,6 +42,23 @@ If the config format changes, update together: `validate()`, editor, `layout.js`
 
 Six-digit pairing code printed at startup (regenerated each restart) → persistent token in `data/token.txt`, stored on iPad as `localStorage.panel_token`, sent as `X-Panel-Token`. `/api/local-token` and editing/upload/backup/restore are loopback-only. Backups exclude tokens.
 
+### iPad connection states
+
+The iPad panel has no top bar; a status pill (`#status`) sits top-right on the page-title line. `setStatus(httpStatus)` in `public/app.js` maps the HTTP status of every request to a state. These requests are `/api/config` every 10 s, `/api/state` every 2 s and `/api/action`. XHRs time out after 8 s. Tapping the pill shows the state's explanation as a toast and retries at once. The browser's `online`/`offline` events also update it.
+
+| State (CSS class) | Label | When |
+|---|---|---|
+| `connecting` | Conectando… | Startup, first failed request before any success |
+| `online` | Conectado | Any response with status 1–499 except 401 |
+| `reconnecting` | Reconectando… | Was connected; 1–2 consecutive network failures (status 0 or timeout) |
+| `lost` | Conexión perdida | Was connected; 3+ consecutive network failures |
+| `server-down` | Servidor apagado | Never connected since load; 2+ network failures (server not running, PC off or wrong Wi-Fi) |
+| `no-network` | Sin Wi-Fi | Network failure while `navigator.onLine === false` |
+| `server-error` | Error del servidor | Status ≥ 500 |
+| `unpaired` | Sin vincular | No token, or status 401 (the pairing screen is shown) |
+
+Labels and explanations live in the `CONNECTION` table in `app.js`; colors are in `style.css` (`.status.<state>`). When adding a state, update both and this table. Network-failure toasts are suppressed during polling because the pill already shows them.
+
 ## Constraints
 
 - **Frontend served to the iPad must be ES5**: `XMLHttpRequest` only, no `fetch`, modules, arrow functions, `let`/`const`, `async`/`await`, optional chaining. No CSS Grid; use prefixed Flexbox. Node test files may use modern JS.
